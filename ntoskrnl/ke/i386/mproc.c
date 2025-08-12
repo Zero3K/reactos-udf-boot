@@ -9,6 +9,7 @@
 /* INCLUDES *****************************************************************/
 
 #include <ntoskrnl.h>
+
 #define NDEBUG
 #include <debug.h>
 
@@ -38,12 +39,28 @@ NTAPI
 KeStartAllProcessors(VOID)
 {
     PVOID KernelStack, DPCStack;
-    SIZE_T ProcessorCount = 0;
     PAPINFO APInfo;
+    ULONG ProcessorCount;
+    ULONG MaximumProcessors;
 
-    while (TRUE)
+    /* NOTE: NT6+ HAL exports HalEnumerateProcessors() and
+     * HalQueryMaximumProcessorCount() that help determining
+     * the number of detected processors on the system. */
+    MaximumProcessors = KeMaximumProcessors;
+
+    /* Limit the number of processors we can start at run-time */
+    if (KeNumprocSpecified)
+        MaximumProcessors = min(MaximumProcessors, KeNumprocSpecified);
+
+    /* Limit also the number of processors we can start during boot-time */
+    if (KeBootprocSpecified)
+        MaximumProcessors = min(MaximumProcessors, KeBootprocSpecified);
+
+    // TODO: Support processor nodes
+
+    /* Start ProcessorCount at 1 because we already have the boot CPU */
+    for (ProcessorCount = 1; ProcessorCount < MaximumProcessors; ++ProcessorCount)
     {
-        ProcessorCount++;
         KernelStack = NULL;
         DPCStack = NULL;
 
@@ -127,7 +144,7 @@ KeStartAllProcessors(VOID)
         KeLoaderBlock->Thread = (ULONG_PTR)&APInfo->Pcr.Prcb->IdleThread;
 
         // Start the CPU
-        DPRINT("Attempting to Start a CPU with number: %u\n", ProcessorCount);
+        DPRINT("Attempting to Start a CPU with number: %lu\n", ProcessorCount);
         if (!HalStartNextProcessor(KeLoaderBlock, ProcessorState))
         {
             break;
@@ -152,5 +169,5 @@ KeStartAllProcessors(VOID)
     if (DPCStack)
         MmDeleteKernelStack(DPCStack, FALSE);
 
-    DPRINT1("KeStartAllProcessors: Successful AP startup count is %u\n", ProcessorCount);
+    DPRINT1("KeStartAllProcessors: Successful AP startup count is %lu\n", ProcessorCount);
 }

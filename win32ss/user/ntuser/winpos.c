@@ -549,7 +549,13 @@ WinPosInitInternalPos(PWND Wnd, RECTL *RestoreRect)
    }
    else
    {
-      Wnd->InternalPos.NormalRect = Rect;
+      /* Lie about the snap; Windows does this so applications don't save their
+       * position as a snap but rather the unsnapped "real" position. */
+      if (!IntIsWindowSnapped(Wnd) ||
+          RECTL_bIsEmptyRect(&Wnd->InternalPos.NormalRect))
+      {
+         Wnd->InternalPos.NormalRect = Rect;
+      }
    }
 }
 
@@ -2031,7 +2037,17 @@ co_WinPosSetWindowPos(
       }
       else if(VisAfter)
       {
-         REGION_bOffsetRgn(VisAfter, -Window->rcWindow.left, -Window->rcWindow.top);
+          /* Clip existing update region to new window size */
+          if (Window->hrgnUpdate != NULL)
+          {
+              PREGION RgnUpdate = REGION_LockRgn(Window->hrgnUpdate);
+              if (RgnUpdate)
+              {
+                  RgnType = IntGdiCombineRgn(RgnUpdate, RgnUpdate, VisAfter, RGN_AND);
+                  REGION_UnlockRgn(RgnUpdate);
+              }
+          }
+          REGION_bOffsetRgn(VisAfter, -Window->rcWindow.left, -Window->rcWindow.top);
       }
 
       /*
@@ -2041,11 +2057,11 @@ co_WinPosSetWindowPos(
        * class need to be completely repainted on (horizontal/vertical) size
        * change.
        */
-      if ( ( VisBefore != NULL &&
-             VisAfter != NULL &&
-            !(WinPos.flags & SWP_NOCOPYBITS) &&
-            ((WinPos.flags & SWP_NOSIZE) || !(WvrFlags & WVR_REDRAW)) &&
-            !(Window->ExStyle & WS_EX_TRANSPARENT) ) )
+      if (VisBefore != NULL &&
+          VisAfter != NULL &&
+          !(WvrFlags & WVR_REDRAW) &&
+          !(WinPos.flags & SWP_NOCOPYBITS) &&
+          !(Window->ExStyle & WS_EX_TRANSPARENT))
       {
 
          /*
@@ -2063,11 +2079,6 @@ co_WinPosSetWindowPos(
          else if (VisBeforeJustClient != NULL)
          {
             RgnType = IntGdiCombineRgn(CopyRgn, VisAfter, VisBeforeJustClient, RGN_AND);
-         }
-
-         if (VisBeforeJustClient != NULL)
-         {
-             REGION_Delete(VisBeforeJustClient);
          }
 
          /* Now use in copying bits which are in the update region. */
@@ -2217,11 +2228,6 @@ co_WinPosSetWindowPos(
          }
       }
 
-      if (CopyRgn != NULL)
-      {
-         REGION_Delete(CopyRgn);
-      }
-
       /* Expose what was covered before but not covered anymore */
       if (VisBefore != NULL)
       {
@@ -2242,12 +2248,6 @@ co_WinPosSetWindowPos(
              }
              REGION_Delete(ExposedRgn);
          }
-         REGION_Delete(VisBefore);
-      }
-
-      if (VisAfter != NULL)
-      {
-         REGION_Delete(VisAfter);
       }
    }
 
@@ -2293,6 +2293,27 @@ co_WinPosSetWindowPos(
    {
       TRACE("No drawing, set no Z order and no redraw!\n");
       WinPos.flags |= SWP_NOZORDER|SWP_NOREDRAW;
+   }
+
+   if (VisBefore != NULL)
+   {
+      REGION_Delete(VisBefore);
+      VisBefore = NULL;
+   }
+   if (VisBeforeJustClient != NULL)
+   {
+      REGION_Delete(VisBeforeJustClient);
+      VisBeforeJustClient = NULL;
+   }
+   if (VisAfter != NULL)
+   {
+      REGION_Delete(VisAfter);
+      VisAfter = NULL;
+   }
+   if (CopyRgn != NULL)
+   {
+      REGION_Delete(CopyRgn);
+      CopyRgn = NULL;
    }
 
    if(!(flags & SWP_DEFERERASE))
@@ -2487,6 +2508,7 @@ co_WinPosMinMaximize(PWND Wnd, UINT ShowFlag, RECT* NewPos)
          case SW_MAXIMIZE:
             {
                //ERR("MinMaximize Maximize\n");
+               IntSetSnapEdge(Wnd, HTNOWHERE); /* Mark as not snapped (for Win+Left,Up,Down) */
                if ((Wnd->style & WS_MAXIMIZE) && (Wnd->style & WS_VISIBLE))
                {
                   SwpFlags = SWP_NOSIZE | SWP_NOMOVE;
@@ -2535,6 +2557,12 @@ co_WinPosMinMaximize(PWND Wnd, UINT ShowFlag, RECT* NewPos)
                   else
                   {
                      *NewPos = wpl.rcNormalPosition;
+                     if (ShowFlag != SW_SHOWNORMAL && ShowFlag != SW_SHOWDEFAULT)
+                     {
+                        UINT edge = IntGetWindowSnapEdge(Wnd);
+                        if (edge)
+                           co_IntCalculateSnapPosition(Wnd, edge, NewPos);
+                     }
                      NewPos->right -= NewPos->left;
                      NewPos->bottom -= NewPos->top;
                      break;
@@ -2558,9 +2586,36 @@ co_WinPosMinMaximize(PWND Wnd, UINT ShowFlag, RECT* NewPos)
    return SwpFlags;
 }
 
+// SW_FORCEMINIMIZE
+void IntForceMinimizeWindow(PWND pWnd)
+{
+    HRGN hRgn;
+    PREGION pRgn;
+
+    if ((pWnd->style & (WS_MINIMIZE | WS_VISIBLE)) != WS_VISIBLE)
+        return;
+
+    if (pWnd->state & WNDS_DESTROYED)
+        return;
+
+    pWnd->ExStyle &= ~WS_EX_MAKEVISIBLEWHENUNGHOSTED;
+
+    IntSetStyle(pWnd, 0, WS_VISIBLE);
+
+    // Invalidate and redraw the window region
+    hRgn = GreCreateRectRgnIndirect(&pWnd->rcWindow);
+    pRgn = REGION_LockRgn(hRgn);
+    co_UserRedrawWindow(UserGetDesktopWindow(), NULL, pRgn, RDW_ALLCHILDREN | RDW_ERASE | RDW_INVALIDATE);
+    REGION_UnlockRgn(pRgn);
+    GreDeleteObject(hRgn);
+
+    // Activate the other window if necessary
+    if (pWnd->spwndParent == pWnd->head.rpdesk->pDeskInfo->spwnd)
+        co_WinPosActivateOtherWindow(pWnd);
+}
+
 /*
    ShowWindow does not set SWP_FRAMECHANGED!!! Fix wine msg test_SetParent:WmSetParentSeq_2:23 wParam bits!
-   Win: xxxShowWindow
  */
 BOOLEAN FASTCALL
 co_WinPosShowWindow(PWND Wnd, INT Cmd)
@@ -2633,7 +2688,10 @@ co_WinPosShowWindow(PWND Wnd, INT Cmd)
             break;
          }
 
-      case SW_FORCEMINIMIZE: /* FIXME: Does not work if thread is hung. */
+      case SW_FORCEMINIMIZE:
+         IntForceMinimizeWindow(Wnd);
+         return WasVisible;
+
       case SW_SHOWMINNOACTIVE:
          Swp |= SWP_NOACTIVATE | SWP_NOZORDER;
          /* Fall through. */
@@ -3861,6 +3919,141 @@ NtUserWindowFromPoint(LONG X, LONG Y)
    TRACE("Leave NtUserWindowFromPoint, ret=%p\n", Ret);
    UserLeave();
    return Ret;
+}
+
+/* Windows 10 (1903?)
+BOOL APIENTRY
+NtUserIsWindowArranged(HWND hWnd)
+{
+    PWND pwnd = UserGetWindowObject(hWnd);
+    return pwnd && IntIsWindowSnapped(pwnd);
+}
+*/
+
+UINT FASTCALL
+IntGetWindowSnapEdge(PWND Wnd)
+{
+    if (Wnd->ExStyle2 & WS_EX2_VERTICALLYMAXIMIZEDLEFT) return HTLEFT;
+    if (Wnd->ExStyle2 & WS_EX2_VERTICALLYMAXIMIZEDRIGHT) return HTRIGHT;
+    return HTNOWHERE;
+}
+
+VOID FASTCALL
+co_IntCalculateSnapPosition(PWND Wnd, UINT Edge, OUT RECT *Pos)
+{
+    POINT maxs, mint, maxt;
+    UINT width, height;
+    UserSystemParametersInfo(SPI_GETWORKAREA, 0, Pos, 0); /* FIXME: MultiMon of PWND */
+
+    co_WinPosGetMinMaxInfo(Wnd, &maxs, NULL, &mint, &maxt);
+    width = Pos->right - Pos->left;
+    width = min(min(max(width / 2, mint.x), maxt.x), width);
+    height = Pos->bottom - Pos->top;
+    height = min(max(height, mint.y), maxt.y);
+
+    switch (Edge)
+    {
+    case HTTOP: /* Maximized (Calculate RECT snap preview for SC_MOVE) */
+        height = min(Pos->bottom - Pos->top, maxs.y);
+        break; 
+    case HTLEFT:
+        Pos->right = width;
+        break;
+    case HTRIGHT:
+        Pos->left = Pos->right - width;
+        break;
+    default:
+        ERR("Unexpected snap edge %#x\n", Edge);
+    }
+    Pos->bottom = Pos->top + height;
+}
+
+VOID FASTCALL
+co_IntSnapWindow(PWND Wnd, UINT Edge)
+{
+    RECT newPos;
+    BOOLEAN wasSnapped = IntIsWindowSnapped(Wnd);
+    UINT normal = !(Wnd->style & (WS_MAXIMIZE | WS_MINIMIZE));
+    USER_REFERENCE_ENTRY ref;
+    BOOLEAN hasRef = FALSE;
+
+    if (Edge == HTTOP)
+    {
+        co_IntSendMessage(UserHMGetHandle(Wnd), WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+        return;
+    }
+    else if (Edge != HTNOWHERE)
+    {
+        UserRefObjectCo(Wnd, &ref);
+        hasRef = TRUE;
+        co_IntCalculateSnapPosition(Wnd, Edge, &newPos);
+        IntSetSnapInfo(Wnd, Edge, (wasSnapped || !normal) ? NULL : &Wnd->rcWindow);
+    }
+    else if (wasSnapped)
+    {
+        if (!normal)
+        {
+            IntSetSnapEdge(Wnd, HTNOWHERE);
+            return;
+        }
+        newPos = Wnd->InternalPos.NormalRect; /* Copy RECT now before it is lost */
+        IntSetSnapInfo(Wnd, HTNOWHERE, NULL);
+    }
+    else
+    {
+        return; /* Already unsnapped, do nothing */
+    }
+
+    TRACE("WindowSnap: %d->%d\n", IntGetWindowSnapEdge(Wnd), Edge);
+    co_WinPosSetWindowPos(Wnd, HWND_TOP,
+                          newPos.left,
+                          newPos.top,
+                          newPos.right - newPos.left,
+                          newPos.bottom - newPos.top,
+                          0);
+    if (hasRef)
+        UserDerefObjectCo(Wnd);
+}
+
+VOID FASTCALL
+IntSetSnapEdge(PWND Wnd, UINT Edge)
+{
+    UINT styleMask = WS_EX2_VERTICALLYMAXIMIZEDLEFT | WS_EX2_VERTICALLYMAXIMIZEDRIGHT;
+    UINT style = 0;
+    switch (Edge)
+    {
+    case HTNOWHERE:
+        style = 0;
+        break;
+    case HTTOP: /* Maximize throws away the snap */
+        style = 0;
+        break;
+    case HTLEFT:
+        style = WS_EX2_VERTICALLYMAXIMIZEDLEFT;
+        break;
+    case HTRIGHT:
+        style = WS_EX2_VERTICALLYMAXIMIZEDRIGHT;
+        break;
+    default:
+        ERR("Unexpected snap edge %#x\n", Edge);
+    }
+    Wnd->ExStyle2 = (Wnd->ExStyle2 & ~styleMask) | style;
+}
+
+VOID FASTCALL
+IntSetSnapInfo(PWND Wnd, UINT Edge, IN const RECT *Pos OPTIONAL)
+{
+    RECT r;
+    IntSetSnapEdge(Wnd, Edge);
+    if (Edge == HTNOWHERE)
+    {
+        RECTL_vSetEmptyRect(&r);
+        Pos = (Wnd->style & WS_MINIMIZE) ? NULL : &r;
+    }
+    if (Pos)
+    {
+        Wnd->InternalPos.NormalRect = *Pos;
+    }
 }
 
 /* EOF */

@@ -274,7 +274,7 @@ BEGIN
     BEGIN
         MENUITEM "Eszközök típus szerint",          IDM_DEVBYTYPE
         MENUITEM "Eszközök kapcsolódás szerint",    IDM_DEVBYCONN
-        MENUITEM "Erőforrások típus szerint",       IDM_RESBYTYPE, GRAYED
+        MENUITEM "Erőforrások típus szerint",       IDM_RESBYTYPE
         MENUITEM "Erőforrások kapcsolódás szerint", IDM_RESBYCONN, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Rejtett eszközök megjelenítése",  IDM_SHOWHIDDEN
@@ -286,14 +286,15 @@ BEGIN
 END
 
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_APPNAME               "ReactOS Eszközkezelő"
   IDS_APP_AUTHORS           "Copyright 2015 Ged Murphy"
   IDS_CONFIRM_DISABLE       "Az eszköz letiltás után nem fog működni.\nBiztosan letiltja?"
   IDS_CONFIRM_UNINSTALL     "Figyelem: arra készül hogy eltávolítsa ezt az eszközt a rendszerből.\nFolytatni szeretné?"
 END
-STRINGTABLE DISCARDABLE
+
+STRINGTABLE
 BEGIN
   IDS_MENU_UPDATE           "Illesztőprogram frissítése..."
   IDS_MENU_ENABLE           "Engedélyezés"
@@ -304,7 +305,7 @@ BEGIN
   IDS_MENU_PROPERTIES       "Tulajdonságok"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_TOOLTIP_PROPERTIES    "Tulajdonságok"
   IDS_TOOLTIP_SCAN          "Hardverváltozások keresése"
@@ -314,8 +315,16 @@ BEGIN
   IDS_TOOLTIP_UNINSTALL     "Eltávolítás"
 END
 
+STRINGTABLE
+BEGIN
+  IDS_TYPE_MEMORY           "Memory"
+  IDS_TYPE_PORT             "Input/output (IO)"
+  IDS_TYPE_DMA              "Direct Memory Access (DMA)"
+  IDS_TYPE_IRQ              "Interrupt request (IRQ)"
+END
+
 /* Hints */
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_HINT_BLANK        " "
   IDS_HINT_PROPERTIES   " Az aktuális kijelölés tulajdonságainak megnyitása."

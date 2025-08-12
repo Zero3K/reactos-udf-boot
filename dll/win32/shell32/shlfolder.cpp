@@ -26,6 +26,131 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
+SHCONTF SHELL_GetDefaultFolderEnumSHCONTF()
+{
+    SHCONTF Flags = SHCONTF_FOLDERS | SHCONTF_NONFOLDERS;
+    SHELLSTATE ss;
+    SHGetSetSettings(&ss, SSF_SHOWALLOBJECTS | SSF_SHOWSUPERHIDDEN, FALSE);
+    if (ss.fShowAllObjects)
+        Flags |= SHCONTF_INCLUDEHIDDEN;
+    if (ss.fShowSuperHidden)
+        Flags |= SHCONTF_INCLUDESUPERHIDDEN;
+     return Flags;
+}
+
+BOOL SHELL_IncludeItemInFolderEnum(IShellFolder *pSF, PCUITEMID_CHILD pidl, SFGAOF Query, SHCONTF Flags)
+{
+    if (SUCCEEDED(pSF->GetAttributesOf(1, &pidl, &Query)))
+    {
+        if (Query & SFGAO_NONENUMERATED)
+            return FALSE;
+        if ((Query & SFGAO_HIDDEN) && !(Flags & SHCONTF_INCLUDEHIDDEN))
+            return FALSE;
+        if ((Query & (SFGAO_HIDDEN | SFGAO_SYSTEM)) == (SFGAO_HIDDEN | SFGAO_SYSTEM) && !(Flags & SHCONTF_INCLUDESUPERHIDDEN))
+            return FALSE;
+        if ((Flags & (SHCONTF_FOLDERS | SHCONTF_NONFOLDERS)) != (SHCONTF_FOLDERS | SHCONTF_NONFOLDERS))
+            return (Flags & SHCONTF_FOLDERS) ? (Query & SFGAO_FOLDER) : !(Query & SFGAO_FOLDER);
+    }
+    return TRUE;
+}
+
+static HRESULT
+MapSCIDToShell32FsColumn(const SHCOLUMNID *pscid, VARTYPE &vt)
+{
+    if (pscid->fmtid == FMTID_Storage)
+    {
+        switch (pscid->pid)
+        {
+            case PID_STG_NAME:        vt = VT_BSTR; return SHFSF_COL_NAME;
+            case PID_STG_SIZE:        vt = VT_UI8; return SHFSF_COL_SIZE;
+            case PID_STG_STORAGETYPE: vt = VT_BSTR; return SHFSF_COL_TYPE;
+            case PID_STG_ATTRIBUTES:  vt = VT_BSTR; return SHFSF_COL_FATTS;
+            case PID_STG_WRITETIME:   vt = VT_DATE; return SHFSF_COL_MDATE;
+        }
+    }
+    if (pscid->fmtid == FMTID_SummaryInformation && pscid->pid == PIDSI_COMMENTS)
+    {
+        vt = VT_BSTR;
+        return SHFSF_COL_COMMENT;
+    }
+    return E_INVALIDARG;
+}
+
+HRESULT
+SHELL_MapSCIDToColumn(IShellFolder2 *pSF, const SHCOLUMNID *pscid)
+{
+    for (UINT i = 0; i <= SHCIDS_COLUMNMASK; ++i)
+    {
+        SHCOLUMNID scid;
+        HRESULT hr = pSF->MapColumnToSCID(i, &scid);
+        if (FAILED(hr))
+            break;
+        if (IsEqualPropertyKey(scid, *pscid))
+            return i;
+    }
+    return E_FAIL;
+}
+
+HRESULT
+SHELL_GetDetailsOfAsStringVariant(IShellFolder2 *pSF, PCUITEMID_CHILD pidl, UINT Column, VARIANT *pVar)
+{
+    V_VT(pVar) = VT_EMPTY;
+    SHELLDETAILS sd;
+    sd.str.uType = STRRET_CSTR;
+    HRESULT hr = pSF->GetDetailsOf(pidl, Column, &sd);
+    if (FAILED(hr))
+        return hr;
+    if (FAILED(hr = StrRetToBSTR(&sd.str, pidl, &V_BSTR(pVar))))
+        return hr;
+    V_VT(pVar) = VT_BSTR;
+    return hr;
+}
+
+HRESULT
+SHELL_GetDetailsOfColumnAsVariant(IShellFolder2 *pSF, PCUITEMID_CHILD pidl, UINT Column, VARTYPE vt, VARIANT *pVar)
+{
+    HRESULT hr = SHELL_GetDetailsOfAsStringVariant(pSF, pidl, Column, pVar);
+    if (FAILED(hr))
+        return hr;
+    if (vt == VT_EMPTY)
+    {
+        SHCOLSTATEF state;
+        if (FAILED(pSF->GetDefaultColumnState(Column, &state)))
+            state = SHCOLSTATE_TYPE_STR;
+        if ((state & SHCOLSTATE_TYPEMASK) == SHCOLSTATE_TYPE_INT)
+            vt = VT_I8;
+        else if ((state & SHCOLSTATE_TYPEMASK) == SHCOLSTATE_TYPE_DATE)
+            vt = VT_DATE;
+        else
+            vt = VT_BSTR;
+    }
+    if (vt != VT_BSTR)
+        VariantChangeType(pVar, pVar, 0, vt);
+    return hr;
+}
+
+HRESULT
+SH32_GetDetailsOfPKeyAsVariant(IShellFolder2 *pSF, PCUITEMID_CHILD pidl, const SHCOLUMNID *pscid, VARIANT *pVar, BOOL UseFsColMap)
+{
+    // CFSFolder and CRegFolder uses the SHFSF_COL columns and can use the faster and better version,
+    // everyone else must ask the folder to map the SCID to a column.
+    VARTYPE vt = VT_EMPTY;
+    HRESULT hr = UseFsColMap ? MapSCIDToShell32FsColumn(pscid, vt) : SHELL_MapSCIDToColumn(pSF, pscid);
+    return SUCCEEDED(hr) ? SHELL_GetDetailsOfColumnAsVariant(pSF, pidl, hr, vt, pVar) : hr;
+}
+
+HRESULT SHELL_CreateAbsolutePidl(IShellFolder *pSF, PCUIDLIST_RELATIVE pidlChild, PIDLIST_ABSOLUTE *ppPidl)
+{
+    PIDLIST_ABSOLUTE pidlFolder;
+    HRESULT hr = SHGetIDListFromObject(pSF, &pidlFolder);
+    if (SUCCEEDED(hr))
+    {
+        hr = SHILCombine(pidlFolder, pidlChild, ppPidl);
+        ILFree(pidlFolder);
+    }
+    return hr;
+}
+
 HRESULT
 Shell_NextElement(
     _Inout_ LPWSTR *ppch,
@@ -267,11 +392,17 @@ HRESULT SHELL32_CompareDetails(IShellFolder2* isf, LPARAM lParam, LPCITEMIDLIST 
     if (FAILED(hres))
         return MAKE_COMPARE_HRESULT(1);
 
-    int ret = wcsicmp(wszItem1, wszItem2);
+    int ret = CFSFolder::CompareUiStrings(wszItem1, wszItem2, lParam);
     if (ret == 0)
         return SHELL32_CompareChildren(isf, lParam, pidl1, pidl2);
 
     return MAKE_COMPARE_HRESULT(ret);
+}
+
+void CloseRegKeyArray(HKEY* array, UINT cKeys)
+{
+    for (UINT i = 0; i < cKeys; ++i)
+        RegCloseKey(array[i]);
 }
 
 LSTATUS AddClassKeyToArray(const WCHAR* szClass, HKEY* array, UINT* cKeys)
@@ -359,10 +490,21 @@ void AddFSClassKeysToArray(UINT cidl, PCUITEMID_CHILD_ARRAY apidl, HKEY* array, 
         AddClassKeyToArray(L"AllFilesystemObjects", array, cKeys);
         AddClassKeyToArray(L"Directory", array, cKeys);
     }
+    else if (_ILIsDrive(pidl))
+    {
+        AddClassKeyToArray(L"Drive", array, cKeys);
+        AddClassKeyToArray(L"Folder", array, cKeys);
+    }
     else
     {
         ERR("Got non FS pidl\n");
     }
+}
+
+void AddPidlClassKeysToArray(LPCITEMIDLIST pidl, HKEY* array, UINT* cKeys)
+{
+    if ((pidl = ILFindLastID(pidl)) != NULL)
+        AddFSClassKeysToArray(1, &pidl, array, cKeys);
 }
 
 HRESULT SH_GetApidlFromDataObject(IDataObject *pDataObject, PIDLIST_ABSOLUTE* ppidlfolder, PUITEMID_CHILD **apidlItems, UINT *pcidl)
@@ -467,36 +609,6 @@ SHOpenFolderAndSelectItems(PCIDLIST_ABSOLUTE pidlFolder,
         return E_FAIL;
 }
 
-static
-DWORD WINAPI
-_ShowPropertiesDialogThread(LPVOID lpParameter)
-{
-    CComPtr<IDataObject> pDataObject;
-    pDataObject.Attach((IDataObject*)lpParameter);
-
-    CDataObjectHIDA cida(pDataObject);
-
-    if (FAILED_UNEXPECTEDLY(cida.hr()))
-        return cida.hr();
-
-    if (cida->cidl > 1)
-    {
-        ERR("SHMultiFileProperties is not yet implemented\n");
-        return E_FAIL;
-    }
-
-    CComHeapPtr<ITEMIDLIST> completePidl(ILCombine(HIDA_GetPIDLFolder(cida), HIDA_GetPIDLItem(cida, 0)));
-    CComHeapPtr<WCHAR> wszName;
-    if (FAILED_UNEXPECTEDLY(SHGetNameFromIDList(completePidl, SIGDN_PARENTRELATIVEPARSING, &wszName)))
-        return 0;
-
-    BOOL bSuccess = SH_ShowPropertiesDialog(wszName, pDataObject);
-    if (!bSuccess)
-        ERR("SH_ShowPropertiesDialog failed\n");
-
-    return 0;
-}
-
 /*
  * for internal use
  */
@@ -505,17 +617,7 @@ SHELL32_ShowPropertiesDialog(IDataObject *pdtobj)
 {
     if (!pdtobj)
         return E_INVALIDARG;
-
-    pdtobj->AddRef();
-    if (!SHCreateThread(_ShowPropertiesDialogThread, pdtobj, CTF_INSIST | CTF_COINIT | CTF_PROCESS_REF, NULL))
-    {
-        pdtobj->Release();
-        return HResultFromWin32(GetLastError());
-    }
-    else
-    {
-        return S_OK;
-    }
+    return SHELL32_ShowFilesystemItemsPropertiesDialogAsync(NULL, pdtobj);
 }
 
 HRESULT

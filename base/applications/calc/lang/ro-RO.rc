@@ -346,8 +346,8 @@ IDR_MENU_SCIENTIFIC_2 MENU
 BEGIN
     POPUP "&Editare"
     BEGIN
-        MENUITEM "&Copiere\tCTRL-C", IDM_EDIT_COPY
-        MENUITEM "&Lipire\tCTRL-V", IDM_EDIT_PASTE
+        MENUITEM "&Copiere\tCtrl-C", IDM_EDIT_COPY
+        MENUITEM "&Lipire\tCtrl-V", IDM_EDIT_PASTE
     END
     POPUP "&Vizualizare"
     BEGIN
@@ -379,8 +379,8 @@ IDR_MENU_STANDARD MENU
 BEGIN
     POPUP "&Editare"
     BEGIN
-        MENUITEM "&Copiere\tCTRL-C", IDM_EDIT_COPY
-        MENUITEM "&Lipire\tCTRL-V", IDM_EDIT_PASTE
+        MENUITEM "&Copiere\tCtrl-C", IDM_EDIT_COPY
+        MENUITEM "&Lipire\tCtrl-V", IDM_EDIT_PASTE
     END
     POPUP "&Vizualizare"
     BEGIN
@@ -509,7 +509,7 @@ BEGIN
     IDS_CURRENCY_LITHUANIAN_LITAS "Litas lituanian"
     IDS_CURRENCY_LUXEMBOURG_FRANC "Franc luxemburghez"
     IDS_CURRENCY_MALTESE_LIRA "Litră malteză"
-    IDS_CURRENCY_PORTOGUESE_ESCUDO "Escudo portughez"
+    IDS_CURRENCY_PORTUGUESE_ESCUDO "Escudo portughez"
     IDS_CURRENCY_SLOVAK_KORUNA "Coroană slovacă"
     IDS_CURRENCY_SLOVENIAN_TOLAR "Tolar sloven"
     IDS_CURRENCY_SPANISH_PESETA "Peseta spaniolă"

@@ -1,6 +1,5 @@
 
-add_definitions(-D__WINESRC__ -D__ROS_LONG64__)
-include_directories(${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
+add_definitions(-D__ROS_LONG64__)
 spec2def(vbscript.dll vbscript.spec)
 
 list(APPEND SOURCE
@@ -45,8 +44,9 @@ if(MSVC)
 endif()
 
 set_module_type(vbscript win32dll)
-target_link_libraries(vbscript uuid wine)
+target_link_libraries(vbscript uuid wine oldnames)
 add_importlibs(vbscript oleaut32 ole32 user32 msvcrt kernel32 ntdll)
 add_dependencies(vbscript vbscript_idlheader stdole2)
 add_pch(vbscript precomp.h "${PCH_SKIP_SOURCE}")
 add_cd_file(TARGET vbscript DESTINATION reactos/system32 FOR all)
+set_wine_module_FIXME(vbscript) # CORE-5743: No ARRAY_SIZE and CONST_VTABLE

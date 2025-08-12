@@ -43,11 +43,16 @@ add_idl_headers(msi_winetest_idlheader typelib.idl)
 generate_idl_iids(typelib.idl)
 add_typelib(typelib.idl)
 
-target_compile_definitions(msi_winetest PRIVATE __WINESRC__ USE_WINE_TODOS)
+target_compile_definitions(msi_winetest PRIVATE __WINESRC__ USE_WINE_TODOS strcasecmp=_stricmp)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     target_compile_options(msi_winetest PRIVATE -Wno-format-overflow -Wno-format)
     target_compile_options(msi_custom PRIVATE -Wno-format)
+endif()
+
+if (MSVC)
+    # Disable warning C5287: operands are different enum types
+    target_compile_options(msi_winetest PRIVATE /wd5287)
 endif()
 
 # msi_winetest.rc: let rc.exe find custom.dll in its subdirectory, i.e. Debug.

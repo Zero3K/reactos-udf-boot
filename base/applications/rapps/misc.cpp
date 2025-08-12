@@ -12,6 +12,18 @@
 
 static HANDLE hLog = NULL;
 
+UINT
+ErrorBox(HWND hOwner, UINT Error)
+{
+    if (!Error)
+        Error = ERROR_INTERNAL_ERROR; // Note: geninst.cpp depends on this
+    WCHAR buf[400];
+    UINT fmf = FORMAT_MESSAGE_IGNORE_INSERTS | FORMAT_MESSAGE_FROM_SYSTEM;
+    FormatMessageW(fmf, NULL, Error, 0, buf, _countof(buf), NULL);
+    MessageBoxW(hOwner, buf, 0, MB_OK | MB_ICONSTOP);
+    return Error;
+}
+
 VOID
 CopyTextToClipboard(LPCWSTR lpszText)
 {
@@ -39,8 +51,33 @@ CopyTextToClipboard(LPCWSTR lpszText)
     CloseClipboard();
 }
 
+static INT_PTR CALLBACK
+NothingDlgProc(HWND hDlg, UINT uMsg, WPARAM, LPARAM)
+{
+    return uMsg == WM_CLOSE ? DestroyWindow(hDlg) : FALSE;
+}
+
 VOID
-ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem)
+EmulateDialogReposition(HWND hwnd)
+{
+    static const DWORD DlgTmpl[] = { WS_POPUP | WS_CAPTION | WS_SYSMENU, 0, 0, 0, 0, 0 };
+    HWND hDlg = CreateDialogIndirectW(NULL, (LPDLGTEMPLATE)DlgTmpl, NULL, NothingDlgProc);
+    if (hDlg)
+    {
+        RECT r;
+        GetWindowRect(hwnd, &r);
+        if (SetWindowPos(hDlg, hDlg, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE))
+        {
+            SendMessage(hDlg, DM_REPOSITION, 0, 0);
+            if (GetWindowRect(hDlg, &r))
+                SetWindowPos(hwnd, hwnd, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        SendMessage(hDlg, WM_CLOSE, 0, 0);
+    }
+}
+
+VOID
+ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem, POINT *Point)
 {
     HMENU hMenu = NULL;
     HMENU hPopupMenu;
@@ -68,15 +105,71 @@ ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem)
         SetMenuDefaultItem(hPopupMenu, DefaultItem, FALSE);
     }
 
-    GetCursorPos(&pt);
+    if (!Point)
+    {
+        GetCursorPos(Point = &pt);
+    }
 
     SetForegroundWindow(hwnd);
-    TrackPopupMenu(hPopupMenu, 0, pt.x, pt.y, 0, hwndOwner, NULL);
+    TrackPopupMenu(hPopupMenu, 0, Point->x, Point->y, 0, hwndOwner, NULL);
 
     if (hMenu)
     {
         DestroyMenu(hMenu);
     }
+}
+
+extern BOOL IsZipFile(PCWSTR Path);
+
+UINT
+ClassifyFile(PCWSTR Path)
+{
+    const UINT share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+    HANDLE hFile = CreateFileW(Path, GENERIC_READ, share, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile != INVALID_HANDLE_VALUE)
+    {
+        BYTE buf[8];
+        DWORD io;
+        if (!ReadFile(hFile, buf, sizeof(buf), &io, NULL) || io != sizeof(buf))
+            buf[0] = 0;
+        CloseHandle(hFile);
+
+        if (buf[0] == 0xD0 && buf[1] == 0xCF && buf[2] == 0x11 && buf[3] == 0xE0 &&
+            buf[4] == 0xA1 && buf[5] == 0xB1 && buf[6] == 0x1A && buf[7] == 0xE1)
+        {
+            return MAKEWORD('M', PERCEIVED_TYPE_APPLICATION); // MSI
+        }
+        if (buf[0] == 'M' || buf[0] == 'Z')
+        {
+            SHFILEINFO shfi;
+            if (SHGetFileInfoW(Path, 0, &shfi, sizeof(shfi), SHGFI_EXETYPE))
+                return MAKEWORD('E', PERCEIVED_TYPE_APPLICATION);
+        }
+        if (buf[0] == 'M' && buf[1] == 'S' && buf[2] == 'C' && buf[3] == 'F')
+        {
+            return MAKEWORD('C', PERCEIVED_TYPE_COMPRESSED); // CAB
+        }
+    }
+
+    if (IsZipFile(Path)) // .zip last because we want to return SFX.exe with higher priority
+    {
+        return MAKEWORD('Z', PERCEIVED_TYPE_COMPRESSED);
+    }
+    return PERCEIVED_TYPE_UNKNOWN;
+}
+
+BOOL
+OpensWithExplorer(PCWSTR Path)
+{
+    WCHAR szCmd[MAX_PATH * 2];
+    DWORD cch = _countof(szCmd);
+    PCWSTR pszExt = PathFindExtensionW(Path);
+    HRESULT hr = AssocQueryStringW(ASSOCF_INIT_IGNOREUNKNOWN | ASSOCF_NOTRUNCATE,
+                                   ASSOCSTR_COMMAND, pszExt, NULL, szCmd, &cch);
+    if (SUCCEEDED(hr) && StrStrIW(szCmd, L" zipfldr.dll,")) // .zip
+        return TRUE;
+    PathRemoveArgsW(szCmd);
+    return SUCCEEDED(hr) && !StrCmpIW(PathFindFileNameW(szCmd), L"explorer.exe"); // .cab
 }
 
 BOOL
@@ -132,6 +225,8 @@ StartProcess(const CStringW &Path, BOOL Wait)
     {
         EnableWindow(hMainWnd, TRUE);
         SetForegroundWindow(hMainWnd);
+        // We got the real activation message during MsgWaitForMultipleObjects while
+        // we were disabled, we need to set the focus again now.
         SetFocus(hMainWnd);
     }
 

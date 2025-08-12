@@ -202,7 +202,7 @@ MMixerGetMixerByName(
         MixerInfo = (LPMIXER_INFO)CONTAINING_RECORD(Entry, MIXER_INFO, Entry);
 
         DPRINT1("MixerName %S MixerName %S\n", MixerInfo->MixCaps.szPname, MixerName);
-        if (wcsicmp(MixerInfo->MixCaps.szPname, MixerName) == 0)
+        if (_wcsicmp(MixerInfo->MixCaps.szPname, MixerName) == 0)
         {
             *OutMixerInfo = MixerInfo;
             return MM_STATUS_SUCCESS;
@@ -673,59 +673,52 @@ MMixerSetGetVolumeControlDetails(
 {
     LPMIXERCONTROLDETAILS_UNSIGNED Input;
     LONG Value;
-    ULONG Index, Channel = 0;
-    ULONG dwValue;
+    ULONG Index, Channel;
     MIXER_STATUS Status;
     LPMIXERVOLUME_DATA VolumeData;
 
-    if (MixerControlDetails->cbDetails != sizeof(MIXERCONTROLDETAILS_SIGNED))
+    if (MixerControlDetails->cbDetails != sizeof(MIXERCONTROLDETAILS_UNSIGNED))
         return MM_STATUS_INVALID_PARAMETER;
 
     VolumeData = (LPMIXERVOLUME_DATA)MixerControl->ExtraData;
     if (!VolumeData)
         return MM_STATUS_UNSUCCESSFUL;
 
-    /* get input */
+    /* Get input */
     Input = (LPMIXERCONTROLDETAILS_UNSIGNED)MixerControlDetails->paDetails;
     if (!Input)
-        return MM_STATUS_UNSUCCESSFUL; /* to prevent dereferencing NULL */
+        return MM_STATUS_UNSUCCESSFUL; /* To prevent dereferencing NULL */
 
-    if (bSet)
+    /* Loop for each channel */
+    for (Channel = 0; Channel < MixerControlDetails->cChannels; Channel++)
     {
-        /* FIXME SEH */
-        Value = Input->dwValue;
-        Index = Value / VolumeData->InputSteppingDelta;
-
-        if (Index >= VolumeData->ValuesCount)
+        if (bSet)
         {
-            DPRINT1("Index %u out of bounds %u \n", Index, VolumeData->ValuesCount);
-            return MM_STATUS_INVALID_PARAMETER;
+            /* FIXME SEH */
+            Index = Input[Channel].dwValue / VolumeData->InputSteppingDelta;
+
+            if (Index >= VolumeData->ValuesCount)
+            {
+                DPRINT1("Index %u out of bounds %u \n", Index, VolumeData->ValuesCount);
+                return MM_STATUS_INVALID_PARAMETER;
+            }
+
+            Value = VolumeData->Values[Index];
         }
 
-        Value = VolumeData->Values[Index];
+        /* Get/set control details */
+        Status = MMixerSetGetControlDetails(MixerContext, MixerControl->hDevice, NodeId, bSet, KSPROPERTY_AUDIO_VOLUMELEVEL, Channel, &Value);
+
+        if (!bSet)
+        {
+            /* FIXME SEH */
+            Input[Channel].dwValue = MMixerGetVolumeControlIndex(VolumeData, Value);
+        }
     }
 
-    /* set control details */
     if (bSet)
     {
-        /* TODO */
-        Status = MMixerSetGetControlDetails(MixerContext, MixerControl->hDevice, NodeId, bSet, KSPROPERTY_AUDIO_VOLUMELEVEL, 0, &Value);
-        Status = MMixerSetGetControlDetails(MixerContext, MixerControl->hDevice, NodeId, bSet, KSPROPERTY_AUDIO_VOLUMELEVEL, 1, &Value);
-    }
-    else
-    {
-        Status = MMixerSetGetControlDetails(MixerContext, MixerControl->hDevice, NodeId, bSet, KSPROPERTY_AUDIO_VOLUMELEVEL, Channel, &Value);
-    }
-
-    if (!bSet)
-    {
-        dwValue = MMixerGetVolumeControlIndex(VolumeData, (LONG)Value);
-        /* FIXME SEH */
-        Input->dwValue = dwValue;
-    }
-    else
-    {
-        /* notify clients of a line change  MM_MIXM_CONTROL_CHANGE with MixerControl->dwControlID */
+        /* Notify clients of a line change */
         MMixerNotifyControlChange(MixerContext, MixerInfo, MM_MIXM_CONTROL_CHANGE, MixerControl->Control.dwControlID);
     }
     return Status;
@@ -764,7 +757,7 @@ MMixerGetDataByDeviceName(
     while(Entry != &MixerList->MixerData)
     {
         MixerData = (LPMIXER_DATA)CONTAINING_RECORD(Entry, MIXER_DATA, Entry);
-        if (wcsicmp(&DeviceName[2], &MixerData->DeviceName[2]) == 0)
+        if (_wcsicmp(&DeviceName[2], &MixerData->DeviceName[2]) == 0)
         {
             /* found entry */
             return MixerData;

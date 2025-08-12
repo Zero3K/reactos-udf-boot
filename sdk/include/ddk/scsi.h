@@ -1239,11 +1239,11 @@ typedef union _CDB {
     UCHAR ExpectedSectorType:3;
     UCHAR Lun:3;
     _ANONYMOUS_UNION union {
-      struct {
+      struct _LBA {
         UCHAR StartingBlockAddress[4];
         UCHAR PlayLength[4];
       } LBA;
-      struct {
+      struct _MSF {
         UCHAR Reserved1;
         UCHAR StartingM;
         UCHAR StartingS;
@@ -1886,6 +1886,27 @@ typedef union _CDB {
     UCHAR Streaming:1;
     UCHAR Control;
   } WRITE12;
+  struct _ATA_PASSTHROUGH12 {
+    UCHAR OperationCode;
+    UCHAR Reserved1:1;
+    UCHAR Protocol:4;
+    UCHAR MultipleCount:3;
+    UCHAR TLength:2;
+    UCHAR ByteBlock:1;
+    UCHAR TDir:1;
+    UCHAR Reserved2:1;
+    UCHAR CkCond:1;
+    UCHAR Offline:2;
+    UCHAR Features;
+    UCHAR SectorCount;
+    UCHAR LbaLow;
+    UCHAR LbaMid;
+    UCHAR LbaHigh;
+    UCHAR Device;
+    UCHAR Command;
+    UCHAR Reserved3;
+    UCHAR Control;
+  } ATA_PASSTHROUGH12;
   struct _READ16 {
     UCHAR OperationCode;
     UCHAR Reserved1:3;
@@ -1944,6 +1965,31 @@ typedef union _CDB {
     UCHAR Reserved2:7;
     UCHAR Control;
   } READ_CAPACITY16;
+  struct _ATA_PASSTHROUGH16 {
+    UCHAR OperationCode;
+    UCHAR Extend:1;
+    UCHAR Protocol:4;
+    UCHAR MultipleCount:3;
+    UCHAR TLength:2;
+    UCHAR ByteBlock:1;
+    UCHAR TDir:1;
+    UCHAR Reserved1:1;
+    UCHAR CkCond:1;
+    UCHAR Offline:2;
+    UCHAR Features15_8;
+    UCHAR Features7_0;
+    UCHAR SectorCount15_8;
+    UCHAR SectorCount7_0;
+    UCHAR LbaLow15_8;
+    UCHAR LbaLow7_0;
+    UCHAR LbaMid15_8;
+    UCHAR LbaMid7_0;
+    UCHAR LbaHigh15_8;
+    UCHAR LbaHigh7_0;
+    UCHAR Device;
+    UCHAR Command;
+    UCHAR Control;
+  } ATA_PASSTHROUGH16;
   struct _TOKEN_OPERATION {
     UCHAR OperationCode;
     UCHAR ServiceAction:5;
@@ -3291,21 +3337,21 @@ typedef struct _LOG_PARAMETER {
 #if !defined(__midl)
     UCHAR AsByte[0];
 #endif
-    struct {
+    struct _THRESHOLD_RESOURCE_COUNT {
       UCHAR ResourceCount[4];
       UCHAR Scope : 2;
       UCHAR Reserved1 : 6;
       UCHAR Reserved2[3];
     } THRESHOLD_RESOURCE_COUNT;
-    struct {
+    struct _TEMPERATURE {
       UCHAR Reserved;
       UCHAR Temperature;
     } TEMPERATURE;
-    struct {
+    struct _DATE_OF_MANUFACTURE {
       UCHAR Year[4];
       UCHAR Week[2];
     } DATE_OF_MANUFACTURE;
-    struct {
+    struct _SELF_TEST_RESULTS {
       UCHAR SelfTestResults : 4;
       UCHAR Reserved1 : 1;
       UCHAR SelfTestCode : 3;
@@ -3319,12 +3365,12 @@ typedef struct _LOG_PARAMETER {
       UCHAR VendorSpecific;
     } SELF_TEST_RESULTS;
 
-    struct {
+    struct _SOLID_STATE_MEDIA {
       UCHAR Reserved[3];
       UCHAR PercentageUsed;
     } SOLID_STATE_MEDIA;
 
-    struct {
+    struct _BACKGROUND_SCAN_STATUS {
       UCHAR PowerOnMinutes[4];
       UCHAR Reserved;
       UCHAR ScanStatus;
@@ -3333,7 +3379,7 @@ typedef struct _LOG_PARAMETER {
       UCHAR MediumScansPerformed[2];
     } BACKGROUND_SCAN_STATUS;
 
-    struct {
+    struct _INFORMATIONAL_EXCEPTIONS {
       UCHAR ASC;
       UCHAR ASCQ;
       UCHAR MostRecentTemperature;

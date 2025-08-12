@@ -173,7 +173,11 @@
  #endif
 #endif /* DECLSPEC_EXPORT */
 
+#ifdef __GNUC__
+#define DECLSPEC_NORETURN __attribute__((noreturn))
+#else
 #define DECLSPEC_NORETURN __declspec(noreturn)
+#endif
 
 #ifndef DECLSPEC_ADDRSAFE
  #if defined(_MSC_VER) && (defined(_M_ALPHA) || defined(_M_AXP64))
@@ -225,6 +229,14 @@
   #define DECLSPEC_NOINLINE
  #endif
 #endif /* DECLSPEC_NOINLINE */
+
+#ifndef DECLSPEC_GUARD_SUPPRESS
+ #if (_MSC_FULL_VER >= 181040116) || defined(_D1VERSIONLKG171_)
+  #define DECLSPEC_GUARD_SUPPRESS  __declspec(guard(suppress))
+ #else
+  #define DECLSPEC_GUARD_SUPPRESS
+ #endif
+#endif
 
 #if !defined(_M_CEE_PURE)
  #define NTAPI_INLINE NTAPI

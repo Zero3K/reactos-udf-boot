@@ -279,6 +279,11 @@ VOID WINAPI SHGetSetSettings(LPSHELLSTATE lpss, DWORD dwMask, BOOL bSet)
     if (bSet)
     {
         DWORD changed = 0;
+        if (dwMask & ~g_CachedSSF)
+        {
+            SHELLSTATE tempstate;
+            SHGetSetSettings(&tempstate, dwMask, FALSE); // Read entries that are not in g_CachedSSF
+        }
 
 #define SHGSS_WriteAdv(name, value, SSF) \
     do { \
@@ -329,6 +334,7 @@ VOID WINAPI SHGetSetSettings(LPSHELLSTATE lpss, DWORD dwMask, BOOL bSet)
     else
     {
         DWORD read = 0, data, cb, dummy = 0;
+        DBG_UNREFERENCED_LOCAL_VARIABLE(dummy);
         if (SHELL_GlobalCounterChanged(&g_ShellStateCounter, SHELL_GCOUNTER_SHELLSTATE))
             g_CachedSSF = 0;
 
@@ -1905,7 +1911,7 @@ HRESULT WINAPI SetAppStartingCursor(HWND u, DWORD v)
  * The SHLoadOLE was called when OLE32.DLL was being loaded to transfer all the
  * information from the shell32 "mini-COM" to ole32.dll.
  *
- * See http://blogs.msdn.com/oldnewthing/archive/2004/07/05/173226.aspx for a
+ * See https://devblogs.microsoft.com/oldnewthing/20040705-00/?p=38573 for a
  * detailed description.
  *
  * Under wine ole32.dll is always loaded as it is imported by shlwapi.dll which is

@@ -28,8 +28,8 @@
 #error Compiler too old!
 #endif
 
-#if defined(__LP64__) || (!defined(_M_AMD64) && defined(__WINESRC__))
-#if !defined(__ROS_LONG64__)
+#if (defined(_LP64) || defined(__LP64__)) && !defined(_M_AMD64)
+#ifndef __ROS_LONG64__
 #define __ROS_LONG64__
 #endif
 #endif
@@ -62,6 +62,14 @@
 #pragma warning(disable:4214)
 #endif
 
+#ifndef DECLSPEC_NOINITALL
+#if defined(_MSC_VER)
+#define DECLSPEC_NOINITALL __pragma(warning(push)) __pragma(warning(disable:4845)) __declspec(no_init_all) __pragma(warning(pop))
+#else
+#define DECLSPEC_NOINITALL
+#endif
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -71,10 +79,12 @@ $define(ULONG=DWORD)
 $define(USHORT=WORD)
 $define(UCHAR=BYTE)
 $include(ntbasedef.h)
+$include(memaccess.h)
 $include(interlocked.h)
 $include(ketypes.h)
 $include(extypes.h)
 $include(rtltypes.h)
+$include(rtlfuncs.h)
 $include(winnt_old.h)
 
 #ifdef __cplusplus

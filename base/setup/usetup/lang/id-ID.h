@@ -975,7 +975,7 @@ static MUI_ENTRY idIDSelectPartitionEntries[] =
     {
         8,
         17,
-        "\x07  Tekan E untuk membuat partisi extended.",
+        "\x07  Tekan E untuk membuat partisi yang diperluas.",
         TEXT_STYLE_NORMAL,
         TEXT_ID_STATIC
     },
@@ -1506,14 +1506,7 @@ static MUI_ENTRY idIDBootLoaderRemovableDiskPageEntries[] =
     {
         6,
         8,
-        "Penyetelan tidak dapat menasang bootloader pada komputer Anda",
-        TEXT_STYLE_NORMAL,
-        TEXT_ID_STATIC
-    },
-    {
-        6,
-        9,
-        "harddisk.",
+        "Penyetelan sedang memasang the bootloader.",
         TEXT_STYLE_NORMAL,
         TEXT_ID_STATIC
     },
@@ -2058,14 +2051,14 @@ MUI_ERROR idIDErrorEntries[] =
     },
     {
         // ERROR_PARTITION_TABLE_FULL,
-        "Anda tidak dapat membuat partisi primary atau extended baru di\n"
+        "Anda tidak dapat membuat partisi primer baru atau yg diperluas di\n"
         "tabel partisi cakram ini karena tabel partisi ini penuh.\n"
         "\n"
         "  * Tekan tombol apapun untuk lanjut."
     },
     {
         // ERROR_ONLY_ONE_EXTENDED,
-        "Anda tidak dapat membuat lebih dari satu partisi extended per satu cakram.\n"
+        "Anda tidak dapat membuat lebih dari satu partisi yang diperluas per satu cakram.\n"
         "\n"
         "  * Tekan tombol apapun untuk lanjut."
     },
@@ -2221,11 +2214,11 @@ MUI_STRING idIDStrings[] =
     {STRING_PARTITIONSIZE,
      "Ukuran partisi baru:"},
     {STRING_CHOOSE_NEW_PARTITION,
-     "Anda telah memilih untuk membuat partisi primary pada"},
+     "Anda telah memilih untuk membuat partisi primer pada"},
     {STRING_CHOOSE_NEW_EXTENDED_PARTITION,
-     "Anda telah memilih untuk membuat partisi extended pada"},
+     "Anda telah memilih untuk membuat partisi yg diperluas pada"},
     {STRING_CHOOSE_NEW_LOGICAL_PARTITION,
-     "Anda telah memilih untuk membuat partisi logical pada"},
+     "Anda telah memilih untuk membuat partisi logikal pada"},
     {STRING_HDPARTSIZE,
     "Mohon masukkan ukuran pada partisi baru dalam bentuk megabyte."},
     {STRING_CREATEPARTITION,
@@ -2269,7 +2262,7 @@ MUI_STRING idIDStrings[] =
     {STRING_KEYBOARDSETTINGSUPDATE,
     "   Memperbarui pengaturan tata letak papan ketik..."},
     {STRING_CODEPAGEINFOUPDATE,
-    "   Menambahkan informasi halaman kode pada registri..."},
+    "   Menambahkan informasi halaman kode..."},
     {STRING_DONE,
     "   Selesai..."},
     {STRING_REBOOTCOMPUTER2,
@@ -2309,7 +2302,7 @@ MUI_STRING idIDStrings[] =
     {STRING_MAXSIZE,
     "MB (maks. %lu MB)"},
     {STRING_EXTENDED_PARTITION,
-    "Partisi Extended"},
+    "Partisi yang Diperluas"},
     {STRING_UNFORMATTED,
     "Baru (Belum Diformat)"},
     {STRING_FORMATUNUSED,

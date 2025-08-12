@@ -280,7 +280,7 @@ BEGIN
     BEGIN
         MENUITEM "Seadmed &tüübi järgi",         IDM_DEVBYTYPE
         MENUITEM "Seadmed &ühenduse järgi",      IDM_DEVBYCONN
-        MENUITEM "R&essursid tüübi järgi",       IDM_RESBYTYPE, GRAYED
+        MENUITEM "R&essursid tüübi järgi",       IDM_RESBYTYPE
         MENUITEM "&Ressursid ühenduse järgi",    IDM_RESBYCONN, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "&Näita peidetud seadmeid",     IDM_SHOWHIDDEN
@@ -292,14 +292,15 @@ BEGIN
 END
 
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_APPNAME               "ReactOS Seadmehaldur"
   IDS_APP_AUTHORS           "Copyright 2015 Ged Murphy"
   IDS_CONFIRM_DISABLE       "Selle seadme keelamine põhjustab selle töötamise lakkamise.\nKas soovite kindlasti seda keelata?"
   IDS_CONFIRM_UNINSTALL     "Hoiatus: Hakkate seda seadet süsteemist desinstallima.\nKas soovite jätkata?"
 END
-STRINGTABLE DISCARDABLE
+
+STRINGTABLE
 BEGIN
   IDS_MENU_UPDATE           "Draiveritarkvara värskendamine..."
   IDS_MENU_ENABLE           "Luba"
@@ -310,7 +311,7 @@ BEGIN
   IDS_MENU_PROPERTIES       "Atribuudid"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_TOOLTIP_PROPERTIES    "Atribuudid"
   IDS_TOOLTIP_SCAN          "Otsi riistvaramuudatusi"
@@ -320,8 +321,16 @@ BEGIN
   IDS_TOOLTIP_UNINSTALL     "Desinstalli"
 END
 
+STRINGTABLE
+BEGIN
+  IDS_TYPE_MEMORY           "Memory"
+  IDS_TYPE_PORT             "Input/output (IO)"
+  IDS_TYPE_DMA              "Direct Memory Access (DMA)"
+  IDS_TYPE_IRQ              "Interrupt request (IRQ)"
+END
+
 /* Hints */
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_HINT_BLANK        " "
   IDS_HINT_PROPERTIES   " Avab antud valike atribuudilehe."

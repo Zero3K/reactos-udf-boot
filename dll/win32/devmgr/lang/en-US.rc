@@ -273,7 +273,7 @@ BEGIN
     BEGIN
         MENUITEM "D&evices by type",             IDM_DEVBYTYPE
         MENUITEM "De&vices by connection",       IDM_DEVBYCONN
-        MENUITEM "Resources by t&ype",           IDM_RESBYTYPE, GRAYED
+        MENUITEM "Resources by t&ype",           IDM_RESBYTYPE
         MENUITEM "Resources by co&nnection",     IDM_RESBYCONN, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Sho&w hidden devices",         IDM_SHOWHIDDEN
@@ -285,14 +285,15 @@ BEGIN
 END
 
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_APPNAME               "ReactOS Device Manager"
   IDS_APP_AUTHORS           "Copyright 2015 Ged Murphy"
   IDS_CONFIRM_DISABLE       "Disabling this device will cause it to stop functioning.\nDo you really want to disable it?"
   IDS_CONFIRM_UNINSTALL     "Warning: You are about to uninstall this device from your system.\nDo you want to continue?"
 END
-STRINGTABLE DISCARDABLE
+
+STRINGTABLE
 BEGIN
   IDS_MENU_UPDATE           "Update driver software..."
   IDS_MENU_ENABLE           "Enable"
@@ -303,7 +304,7 @@ BEGIN
   IDS_MENU_PROPERTIES       "Properties"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_TOOLTIP_PROPERTIES    "Properties"
   IDS_TOOLTIP_SCAN          "Scan for hardware changes"
@@ -313,8 +314,16 @@ BEGIN
   IDS_TOOLTIP_UNINSTALL     "Uninstall"
 END
 
+STRINGTABLE
+BEGIN
+  IDS_TYPE_MEMORY           "Memory"
+  IDS_TYPE_PORT             "Input/output (IO)"
+  IDS_TYPE_DMA              "Direct Memory Access (DMA)"
+  IDS_TYPE_IRQ              "Interrupt request (IRQ)"
+END
+
 /* Hints */
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_HINT_BLANK        " "
   IDS_HINT_PROPERTIES   " Open property dialog for the current selection."

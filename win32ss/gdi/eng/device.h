@@ -8,9 +8,6 @@ NTAPI
 PDEVOBJ_vRefreshModeList(
     PPDEVOBJ ppdev);
 
-extern PGRAPHICS_DEVICE gpPrimaryGraphicsDevice;
-extern PGRAPHICS_DEVICE gpVgaGraphicsDevice;
-
 VOID
 APIENTRY
 EngFileWrite(
@@ -18,6 +15,11 @@ EngFileWrite(
     _In_reads_(nLength) PVOID lpBuffer,
     _In_ SIZE_T nLength,
     _Out_ PSIZE_T lpBytesWritten);
+
+NTSTATUS
+NTAPI
+EngpUpdateMonitorDevices(
+    _In_ PGRAPHICS_DEVICE pGraphicsDevice);
 
 PGRAPHICS_DEVICE
 NTAPI

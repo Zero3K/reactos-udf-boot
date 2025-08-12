@@ -104,6 +104,54 @@ extern "C" {
 #define PT_IESPECIAL2	0xb1
 #define PT_SHARE	0xc3
 
+#ifdef __REACTOS__
+#define PT_FOLDERTYPEMASK       0x70
+#define PT_DESKTOP_REGITEM      0x1F // => SHDID_ROOT_REGITEM
+#define PT_COMPUTER_REGITEM     0x2E // => SHDID_COMPUTER_?
+#define PT_COMPUTER_DRIVE       0x2F
+#define PT_FS                   0x30 // Win95 SHSimpleIDListFromPath
+#define PT_FS_FOLDER_FLAG       0x01
+#define PT_FS_FILE_FLAG         0x02
+#define PT_FS_UNICODE_FLAG      0x04
+#define PT_FS_COMMON_FLAG       0x08
+//      PT_NET_REGITEM          0x4? // => SHDID_NET_OTHER
+#define PT_INTERNET             0x60
+#define PT_INTERNET_URL         0x61
+#define PT_CONTROLS_OLDREGITEM  0x70
+#define PT_CONTROLS_NEWREGITEM  0x71
+
+#define REGITEMLOCATION_CONTROLS CSIDL_DRIVES
+#define REGITEMLOCATION_PRINTERS CSIDL_CONTROLS
+
+#define REGITEMORDER_DEFAULT                 0x80
+#define REGITEMORDER_LIBRARIES               0x42
+#define REGITEMORDER_USERSFILEFOLDER         0x44
+#define REGITEMORDER_MYCOMPUTER              0x50
+#define REGITEMORDER_MYDOCS_BEFOREMYCOMPUTER 0x48 // Tweak UI "Desktop => First Icon" only
+#define REGITEMORDER_MYDOCS_AFTERMYCOMPUTER  0x54 // accepts these two values.
+#define REGITEMORDER_MYDOCS_DEFAULT          0x48
+#define REGITEMORDER_NETHOOD                 0x58
+#if (REGITEMLOCATION_CONTROLS == CSIDL_DESKTOP)
+#define REGITEMORDER_RECYCLEBIN              0x78
+#else
+#define REGITEMORDER_RECYCLEBIN              0x60
+#endif
+#define REGITEMORDER_INTERNET                0x68
+#define REGITEMORDER_DESKTOP_CONTROLS        0x70 // NT6
+#define REGITEMORDER_MYCOMPUTER_CONTROLS     0x1E // NT5
+#endif // __REACTOS__
+
+static inline BYTE _ILGetType(LPCITEMIDLIST pidl)
+{
+    return pidl && pidl->mkid.cb >= 3 ? pidl->mkid.abID[0] : 0;
+}
+
+static inline BYTE _ILGetFSType(LPCITEMIDLIST pidl)
+{
+    const BYTE type = _ILGetType(pidl);
+    return (type & PT_FOLDERTYPEMASK) == PT_FS ? type : 0;
+}
+
 #include "pshpack1.h"
 typedef BYTE PIDLTYPE;
 
@@ -133,21 +181,11 @@ typedef struct tagPIDLPrinterStruct
     WCHAR szName[1];
 } PIDLPrinterStruct;
 
-typedef struct tagPIDLRecycleStruct
-{
-    FILETIME LastModification;
-    FILETIME DeletionTime;
-    ULARGE_INTEGER FileSize;
-    ULARGE_INTEGER PhysicalFileSize;
-    DWORD Attributes;
-    WCHAR szName[1];
-} PIDLRecycleStruct;
-
 #endif /* !__REACTOS__ */
 
 typedef struct tagGUIDStruct
 {
-    BYTE dummy; /* offset 01 is unknown */
+    BYTE uSortOrder;
     GUID guid;  /* offset 02 */
 } GUIDStruct;
 
@@ -209,7 +247,6 @@ typedef struct tagPIDLDATA
 #ifdef __REACTOS__
           struct tagPIDLFontStruct cfont;
           struct tagPIDLPrinterStruct cprinter;
-          struct tagPIDLRecycleStruct crecycle;
 #endif
 	}u;
 } PIDLDATA, *LPPIDLDATA;
@@ -219,10 +256,8 @@ typedef struct tagPIDLDATA
  * getting special values from simple pidls
  */
 DWORD   _ILSimpleGetTextW   (LPCITEMIDLIST pidl, LPWSTR pOut, UINT uOutSize) DECLSPEC_HIDDEN;
-BOOL    _ILGetFileDate      (LPCITEMIDLIST pidl, LPWSTR pOut, UINT uOutSize) DECLSPEC_HIDDEN;
 DWORD   _ILGetFileSize      (LPCITEMIDLIST pidl, LPWSTR pOut, UINT uOutSize) DECLSPEC_HIDDEN;
 BOOL    _ILGetExtension     (LPCITEMIDLIST pidl, LPWSTR pOut, UINT uOutSize) DECLSPEC_HIDDEN;
-void    _ILGetFileType      (LPCITEMIDLIST pidl, LPWSTR pOut, UINT uOutSize) DECLSPEC_HIDDEN;
 DWORD   _ILGetFileAttributes(LPCITEMIDLIST pidl, LPWSTR pOut, UINT uOutSize) DECLSPEC_HIDDEN;
 BOOL    _ILGetFileDateTime  (LPCITEMIDLIST pidl, FILETIME *ft) DECLSPEC_HIDDEN;
 DWORD   _ILGetDrive         (LPCITEMIDLIST, LPWSTR, UINT) DECLSPEC_HIDDEN;
@@ -236,8 +271,7 @@ BOOL	_ILIsMyComputer		(LPCITEMIDLIST pidl) DECLSPEC_HIDDEN;
 #ifdef __REACTOS__
 BOOL	_ILIsMyDocuments	(LPCITEMIDLIST pidl);
 BOOL	_ILIsBitBucket		(LPCITEMIDLIST pidl);
-BOOL	_ILIsNetHood		(LPCITEMIDLIST pidl);
-BOOL    _ILIsControlPanel   (LPCITEMIDLIST pidl);
+#define _ILIsFolderOrFile   _ILGetFSType
 #endif
 BOOL	_ILIsDrive		(LPCITEMIDLIST pidl) DECLSPEC_HIDDEN;
 BOOL	_ILIsFolder		(LPCITEMIDLIST pidl) DECLSPEC_HIDDEN;
@@ -245,14 +279,8 @@ BOOL	_ILIsValue		(LPCITEMIDLIST pidl) DECLSPEC_HIDDEN;
 BOOL	_ILIsSpecialFolder	(LPCITEMIDLIST pidl) DECLSPEC_HIDDEN;
 BOOL	_ILIsPidlSimple		(LPCITEMIDLIST pidl) DECLSPEC_HIDDEN;
 BOOL	_ILIsCPanelStruct	(LPCITEMIDLIST pidl) DECLSPEC_HIDDEN;
-static inline 
-BOOL    _ILIsEqualSimple        (LPCITEMIDLIST pidlA, LPCITEMIDLIST pidlB)
-{
-    return (pidlA->mkid.cb > 0 && !memcmp(pidlA, pidlB, pidlA->mkid.cb)) ||
-            (!pidlA->mkid.cb && !pidlB->mkid.cb);
-}
-static inline
-BOOL    _ILIsEmpty              (LPCITEMIDLIST pidl) { return _ILIsDesktop(pidl); }
+static inline BOOL _ILIsEmpty(LPCITEMIDLIST pidl) { return _ILIsDesktop(pidl); }
+UINT _ILGetDepth(LPCITEMIDLIST pidl);
 
 /*
  * simple pidls
@@ -261,16 +289,19 @@ BOOL    _ILIsEmpty              (LPCITEMIDLIST pidl) { return _ILIsDesktop(pidl)
 /* Creates a PIDL with guid format and type type, which must be one of PT_GUID,
  * PT_SHELLEXT, or PT_YAGUID.
  */
-LPITEMIDLIST	_ILCreateGuid(PIDLTYPE type, REFIID guid) DECLSPEC_HIDDEN;
+LPITEMIDLIST	_ILCreateGuid(PIDLTYPE type, REFIID guid, BYTE SortOrder);
 
+#ifndef __REACTOS__
 /* Like _ILCreateGuid, but using the string szGUID. */
 LPITEMIDLIST	_ILCreateGuidFromStrA(LPCSTR szGUID) DECLSPEC_HIDDEN;
 LPITEMIDLIST	_ILCreateGuidFromStrW(LPCWSTR szGUID) DECLSPEC_HIDDEN;
+#endif
 
 /* Commonly used PIDLs representing file system objects. */
 LPITEMIDLIST	_ILCreateDesktop	(void) DECLSPEC_HIDDEN;
 LPITEMIDLIST	_ILCreateFromFindDataW(const WIN32_FIND_DATAW *stffile) DECLSPEC_HIDDEN;
 HRESULT		_ILCreateFromPathW	(LPCWSTR szPath, LPITEMIDLIST* ppidl) DECLSPEC_HIDDEN;
+LPITEMIDLIST SHELL32_CreateSimpleIDListFromPath(LPCWSTR pszPath, DWORD dwAttributes);
 
 /* Other helpers */
 LPITEMIDLIST	_ILCreateMyComputer	(void) DECLSPEC_HIDDEN;

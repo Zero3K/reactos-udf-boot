@@ -1780,6 +1780,11 @@ typedef struct tagNMBCDROPDOWN {
 #define TTI_INFO 1
 #define TTI_WARNING 2
 #define TTI_ERROR 3
+#if (_WIN32_WINNT >= 0x0600)
+#define TTI_INFO_LARGE 4
+#define TTI_WARNING_LARGE 5
+#define TTI_ERROR_LARGE 6
+#endif
 
 #define TTM_ACTIVATE (WM_USER+1)
 #define TTM_SETDELAYTIME (WM_USER+3)
@@ -4876,9 +4881,21 @@ typedef struct {
 
   WINCOMMCTRLAPI
   BOOL
+  WINAPI Str_SetPtrA(
+    _Inout_ LPSTR *ppsz,
+    _In_opt_ LPCSTR psz);
+
+  WINCOMMCTRLAPI
+  BOOL
   WINAPI Str_SetPtrW(
     _Inout_ LPWSTR *ppsz,
     _In_opt_ LPCWSTR psz);
+
+#ifdef UNICODE
+#define Str_SetPtr Str_SetPtrW
+#else
+#define Str_SetPtr Str_SetPtrA
+#endif
 
 typedef struct _DPASTREAMINFO {
   int iPos;

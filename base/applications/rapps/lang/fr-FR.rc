@@ -46,31 +46,13 @@ BEGIN
     END
 END
 
-IDR_APPLICATIONMENU MENU
-BEGIN
-    POPUP ""
-    BEGIN
-        MENUITEM "&Installer\tCtrl+Entrée", ID_INSTALL
-        MENUITEM "&Désinstaller\tCtrl+Suppr", ID_UNINSTALL
-        MENUITEM "&Modifier", ID_MODIFY
-        MENUITEM SEPARATOR
-        MENUITEM "&Supprimer du registre", ID_REGREMOVE
-        MENUITEM SEPARATOR
-        MENUITEM "&Rafraîchir\tF5", ID_REFRESH
-        MENUITEM SEPARATOR
-        MENUITEM "Mettre à jour la &base\tCtrl+F5", ID_RESETDB
-    END
-END
-
 IDD_SETTINGS_DIALOG DIALOGEX 0, 0, 250, 265
 STYLE DS_SHELLFONT | DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Configuration"
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX "Général", -1, 4, 2, 240, 61
-    AUTOCHECKBOX "&Enregistrer la position de la fenêtre", IDC_SAVE_WINDOW_POS, 15, 12, 219, 12
-    AUTOCHECKBOX "&Mettre à jour la liste des programmes accessibles au démarrage", IDC_UPDATE_AVLIST, 15, 29, 222, 12
-    AUTOCHECKBOX "&Journal de l'installation et de la suppression des programmes", IDC_LOG_ENABLED, 15, 46, 219, 12
+    CONTROL "", IDC_GENERALLIST, "SysListView32", WS_TABSTOP | LVCHECKSTYLES, 15, 12, 219, 46, WS_EX_STATICEDGE
     GROUPBOX "Téléchargement", -1, 4, 65, 240, 51
     LTEXT "Dossier des téléchargements :", -1, 16, 75, 100, 9
     EDITTEXT IDC_DOWNLOAD_DIR_EDIT, 15, 86, 166, 12, WS_CHILD | WS_VISIBLE | WS_GROUP | ES_AUTOHSCROLL
@@ -191,11 +173,20 @@ STRINGTABLE
 BEGIN
     IDS_APPTITLE "Gestionnaire d'applications ReactOS"
     IDS_APP_AUTHORS "Copyright 2009 Dmitry Chapyshev"
-    IDS_SEARCH_TEXT "Chercher…"
-    IDS_APPS_COUNT "Nombre d'applications : %d ; Sélectionnées : %d"
-    IDS_WELCOME_TITLE "Bienvenue dans ReactOS Applications Manager !\n\n"
+    IDS_WELCOME_TITLE "Bienvenue dans ReactOS Applications Manager !"
     IDS_WELCOME_TEXT "Choisissez une catégorie à gauche, ensuite choisissez une application à installer ou désinstaller.\nSite internet de ReactOS : "
     IDS_WELCOME_URL "https://reactos.org"
+
+    IDS_APPWIZ_TITLE "Ajout/Suppression de programmes" // "Ajouter/Supprimer des Programmes"
+    IDS_APPWIZ_TEXT1 "Choisissez ""Applications"" ou ""Mises à jour"" pour voir la liste des programmes ou des mises à jour installés sur votre système."
+    IDS_APPWIZ_TEXT2 "Pour supprimer un programme, ou modifier ses composants installés, sélectionnez-le dans la liste et cliquez sur ""Désinstaller"" ou ""Modifier""."
+END
+
+STRINGTABLE
+BEGIN
+    IDS_SEARCH_TEXT "Chercher…"
+    IDS_APPS_COUNT "Nombre d'applications : %d"
+    IDS_APPS_SELECT_COUNT " ; Sélectionnées : %d"
     IDS_INSTALLED "Installé"
     IDS_AVAILABLEFORINST "Disponible pour installation"
     IDS_UPDATES "Mises à jour"
@@ -222,6 +213,10 @@ BEGIN
     IDS_APP_DISPLAY_LIST "Liste"
     IDS_APP_DISPLAY_TILE "Tuile"
     IDS_NO_SEARCH_RESULTS "Aucun résultat"
+    IDS_CFG_SAVE_WINDOW_POS "Enregistrer la position de la fenêtre"
+    IDS_CFG_UPDATE_AVLIST "Mettre à jour la liste des programmes accessibles au démarrage"
+    IDS_CFG_LOG_ENABLED "Journal de l'installation et de la suppression des programmes"
+    IDS_CFG_SMALL_ICONS "Petites icônes"
 END
 
 STRINGTABLE
@@ -274,5 +269,6 @@ END
 
 STRINGTABLE
 BEGIN
-    IDS_INSTGEN_CONFIRMUNINST "Are you sure you want to uninstall %s?"
+    IDS_INSTGEN_CONFIRMUNINST "Êtes-vous sûr de vouloir désinstaller %s ?"
+    IDS_INSTGEN_CONFIRMINSTRUNAPP "Installation complete, run %s now?"
 END

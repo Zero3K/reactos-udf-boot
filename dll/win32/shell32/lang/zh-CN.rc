@@ -98,6 +98,14 @@ BEGIN
     END
 END
 
+IDM_DVSELECT MENU
+BEGIN
+    POPUP ""
+    BEGIN
+        MENUITEM "Se&lect", 0
+    END
+END
+
 IDD_BROWSE_FOR_FOLDER DIALOGEX 15, 40, 188, 192
 STYLE DS_SHELLFONT | DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "浏览文件夹"
@@ -606,17 +614,18 @@ BEGIN
     DEFPUSHBUTTON "开始(&S)", IDOK, 53, 198, 60, 14
     PUSHBUTTON "关闭(&C)", IDCANCEL, 118, 198, 60, 14
     LTEXT "容量(&P)：", -1, 7, 6, 169, 9
-    COMBOBOX 28673, 7, 17, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28673, 7, 17, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT "文件系统(&F)", -1, 7, 35, 170, 9
-    COMBOBOX 28677, 7, 46, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28677, 7, 46, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     CONTROL "", 28678, "MSCTLS_PROGRESS32", 0, 7, 181, 170, 8
     LTEXT "分配单元大小(&A)", -1, 7, 64, 170, 9
-    COMBOBOX 28680, 7, 75, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28680, 7, 75, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT "卷标(&L)", -1, 7, 93, 170, 9
     EDITTEXT 28679, 7, 103, 170, 13, ES_AUTOHSCROLL
     GROUPBOX "格式化选项(&O)", 4610, 7, 121, 170, 49
     AUTOCHECKBOX "快速格式化(&Q)", 28674, 16, 135, 155, 10
     AUTOCHECKBOX "启用压缩(&E)", 28675, 16, 152, 155, 10
+    CONTROL "", 30000, "STATIC", SS_ICON | WS_TABSTOP | SS_CENTERIMAGE | SS_NOTIFY, 7, 198, 15, 14
 END
 
 IDD_CHECK_DISK DIALOGEX 50, 50, 194, 115
@@ -639,8 +648,8 @@ CAPTION "更改图标"
 FONT 9, "宋体", 400, 0, 0x1
 BEGIN
     LTEXT "在这个文件中查找图标：", -1, 7, 7, 179, 10
-    PUSHBUTTON "浏览...", IDC_BUTTON_PATH, 135, 17, 50, 14
     EDITTEXT IDC_EDIT_PATH, 7, 17, 123, 14, ES_AUTOHSCROLL
+    PUSHBUTTON "浏览...", IDC_BUTTON_PATH, 135, 17, 50, 14
     LTEXT "从以下列表选择一个图标：", -1, 7, 36, 179, 10
     LISTBOX IDC_PICKICON_LIST, 7, 47, 181, 122, LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | LBS_MULTICOLUMN | LBS_DISABLENOSCROLL | WS_HSCROLL | WS_TABSTOP
     DEFPUSHBUTTON "确定", IDOK, 81, 179, 50, 14
@@ -977,7 +986,10 @@ BEGIN
     IDS_PRINT_VERB "打印"
     IDS_CMD_VERB "在此打开命令提示符"
 
+    IDS_MULTIPLETYPES   "Multiple Types"
+    IDS_VARIOUSFOLDERS  "Various Folders"
     IDS_FILE_FOLDER "%u 个文件，%u 个文件夹"
+
     IDS_PRINTERS "打印机"
     IDS_FONTS "字体"
     IDS_INSTALLNEWFONT "安装新字体..."
@@ -992,10 +1004,6 @@ BEGIN
     IDS_FILE_TYPES "文件类型"
     IDS_COLUMN_EXTENSION "扩展名"
 
-    /* As in 'INI File' or 'WAV File', fallback string for no-name extensions
-       used in the _File type_ tab of the _Folder Options_ dialog */
-    IDS_FILE_EXT_TYPE "%s 文件"
-
     IDS_BYTES_FORMAT "字节"
     IDS_UNKNOWN_APP "未知应用程序"
     IDS_EXE_DESCRIPTION "描述："
@@ -1003,6 +1011,12 @@ BEGIN
     IDS_MENU_EMPTY "(空)"
     IDS_OBJECTS "%d 个对象"
     IDS_OBJECTS_SELECTED "已选中 %d 个对象"
+
+    IDS_SEARCH_BROWSEITEM "浏览..."
+
+    IDS_RECYCLE_CLEANER_DISPLAYNAME "Recycle Bin"
+    IDS_RECYCLE_CLEANER_DESCRIPTION "The Recycle Bin contains files you have deleted from your computer. These files are not permanently removed until you empty the Recycle Bin."
+    IDS_RECYCLE_CLEANER_BUTTON_TEXT "&View Files"
 
     IDS_TITLE_MYCOMP "我的电脑"
     IDS_TITLE_MYNET "网上邻居"
@@ -1038,6 +1052,10 @@ BEGIN
     IDS_ADVANCED_DISPLAY_RUN "显示运行"
     IDS_ADVANCED_DISPLAY_ADMINTOOLS "显示管理工具"
     IDS_ADVANCED_SMALL_START_MENU "在“开始”菜单中显示小图标"
+
+    IDS_VISEFFECT_DRAGFULL "Show window contents while dragging"
+    IDS_VISEFFECT_FONTSMOOTHING "Smooth edges of screen fonts"
+    IDS_VISEFFECT_LISTVIEWSHADOW "Use drop shadows for icon labels on the desktop"
 
     IDS_NEWEXT_ADVANCED_LEFT "<< 高级(&V)"
     IDS_NEWEXT_ADVANCED_RIGHT "高级(&V) >>"

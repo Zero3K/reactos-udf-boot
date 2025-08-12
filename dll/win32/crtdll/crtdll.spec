@@ -1,8 +1,8 @@
 # Old C runtime library.
 
-@ cdecl ??2@YAPAXI@Z(long) MSVCRT_operator_new # void * __cdecl operator new(unsigned int)
-@ cdecl ??3@YAXPAX@Z(ptr) MSVCRT_operator_delete # void __cdecl operator delete(void *)
-@ cdecl ?_set_new_handler@@YAP6AHI@ZP6AHI@Z@Z(ptr) MSVCRT__set_new_handler # int (__cdecl*__cdecl _set_new_handler(int (__cdecl*)(unsigned int)))(unsigned int)
+@ cdecl ??2@YAPAXI@Z(long) operator_new # void * __cdecl operator new(unsigned int)
+@ cdecl ??3@YAXPAX@Z(ptr) operator_delete # void __cdecl operator delete(void *)
+@ cdecl ?_set_new_handler@@YAP6AHI@ZP6AHI@Z@Z(ptr) _set_new_handler # int (__cdecl*__cdecl _set_new_handler(int (__cdecl*)(unsigned int)))(unsigned int)
 @ cdecl _CIacos()
 @ cdecl _CIasin()
 @ cdecl _CIatan()
@@ -236,7 +236,7 @@
 @ cdecl _mkdir(str)
 @ cdecl _mktemp(str)
 @ cdecl _msize(ptr)
-@ cdecl _nextafter(double double)
+@ cdecl _nextafter(double double) nextafter
 @ cdecl _onexit(ptr)
 @ varargs _open(str long)
 @ cdecl _open_osfhandle(long long)

@@ -28,17 +28,22 @@ class CDrivesFolder :
     public CComObjectRootEx<CComMultiThreadModelNoCS>,
     public IShellFolder2,
     public IPersistFolder2,
-    public IContextMenuCB
+    public IContextMenuCB,
+    public IShellFolderViewCB, // Only exists so DefView can get IFolderFilter
+    public IFolderFilter
 {
     private:
         /* both paths are parsible from the desktop */
         LPITEMIDLIST pidlRoot;    /* absolute pidl */
         CComPtr<IShellFolder2> m_regFolder;
+        INT8 m_DriveDisplayMode;
 
     public:
         CDrivesFolder();
         ~CDrivesFolder();
         HRESULT WINAPI FinalConstruct();
+
+        static HRESULT SetDriveLabel(HWND hwndOwner, PCWSTR DrivePath, PCWSTR Label);
 
         // IShellFolder
         STDMETHOD(ParseDisplayName)(HWND hwndOwner, LPBC pbc, LPOLESTR lpszDisplayName, DWORD *pchEaten, PIDLIST_RELATIVE *ppidl, DWORD *pdwAttributes) override;
@@ -73,6 +78,13 @@ class CDrivesFolder :
         // IContextMenuCB
         STDMETHOD(CallBack)(IShellFolder *psf, HWND hwndOwner, IDataObject *pdtobj, UINT uMsg, WPARAM wParam, LPARAM lParam) override;
 
+        // IShellFolderViewCB
+        STDMETHODIMP MessageSFVCB(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
+
+        // IFolderFilter
+        STDMETHOD(ShouldShow)(IShellFolder *psf, PCIDLIST_ABSOLUTE pidlFolder, PCUITEMID_CHILD pidlItem) override;
+        STDMETHODIMP GetEnumFlags(IShellFolder*, PCIDLIST_ABSOLUTE, HWND*, DWORD*) override { return E_NOTIMPL; }
+
         DECLARE_REGISTRY_RESOURCEID(IDR_MYCOMPUTER)
         DECLARE_CENTRAL_INSTANCE_NOT_AGGREGATABLE(CDrivesFolder)
 
@@ -85,6 +97,8 @@ class CDrivesFolder :
         COM_INTERFACE_ENTRY_IID(IID_IPersistFolder2, IPersistFolder2)
         COM_INTERFACE_ENTRY_IID(IID_IPersist, IPersist)
         COM_INTERFACE_ENTRY_IID(IID_IContextMenuCB, IContextMenuCB)
+        COM_INTERFACE_ENTRY_IID(IID_IShellFolderViewCB, IShellFolderViewCB)
+        COM_INTERFACE_ENTRY_IID(IID_IFolderFilter, IFolderFilter)
         END_COM_MAP()
 };
 

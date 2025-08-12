@@ -1,6 +1,6 @@
 
 add_definitions(-D_WINE)
-include_directories(BEFORE ${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
+include_directories(BEFORE ${REACTOS_SOURCE_DIR}/sdk/include/wine)
 spec2def(winmm.dll winmm.spec ADD_IMPORTLIB)
 
 list(APPEND SOURCE
@@ -24,13 +24,14 @@ add_library(winmm MODULE
 
 if(MSVC)
     # Disable warning C4090: 'function': different 'const' qualifiers
+    # Disable warning C4146: unary minus operator applied to unsigned type, result still unsigned
     # Disable warning C4312: 'type cast': conversion from 'DWORD' to 'HTASK' of greater size
-    target_compile_options(winmm PRIVATE /wd4090 /wd4312)
+    target_compile_options(winmm PRIVATE /wd4090 /wd4146 /wd4312)
 endif()
 
 set_module_type(winmm win32dll)
-target_link_libraries(winmm wine ${PSEH_LIB})
-add_importlibs(winmm advapi32 user32 msvcrt kernel32 ntdll)
+target_link_libraries(winmm wine ${PSEH_LIB} oldnames)
+add_importlibs(winmm userenv advapi32 user32 msvcrt kernel32 ntdll)
 add_pch(winmm winemm.h SOURCE)
 add_cd_file(TARGET winmm DESTINATION reactos/system32 FOR all)
 

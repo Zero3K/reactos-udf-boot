@@ -275,7 +275,7 @@ BEGIN
     BEGIN
         MENUITEM "&Türe Göre Aygıtlar",         IDM_DEVBYTYPE
         MENUITEM "&Bağlantıya Göre Aygıtlar",   IDM_DEVBYCONN
-        MENUITEM "T&üre Göre Kaynaklar",        IDM_RESBYTYPE, GRAYED
+        MENUITEM "T&üre Göre Kaynaklar",        IDM_RESBYTYPE
         MENUITEM "B&ağlantıya Göre Kaynaklar",  IDM_RESBYCONN, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "&Gizli Aygıtları Göster",     IDM_SHOWHIDDEN
@@ -287,7 +287,7 @@ BEGIN
 END
 
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_APPNAME               "ReactOS Aygıt Yöneticisi"
   IDS_APP_AUTHORS           "Telif Hakkı: 2015 Ged Murphy"
@@ -295,7 +295,7 @@ BEGIN
   IDS_CONFIRM_UNINSTALL     "Uyarı: Bu aygıtı sisteminizden kaldırmak üzeresiniz.\nDevam etmek istiyor musunuz?"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_MENU_UPDATE           "Sürücü Yazılımını Güncelleştir..."
   IDS_MENU_ENABLE           "Etkinleştir"
@@ -306,7 +306,7 @@ BEGIN
   IDS_MENU_PROPERTIES       "Özellikler"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_TOOLTIP_PROPERTIES    "Özellikler"
   IDS_TOOLTIP_SCAN          "Donanım Değişiklikleri İçin Tara"
@@ -316,8 +316,16 @@ BEGIN
   IDS_TOOLTIP_UNINSTALL     "Kaldır"
 END
 
+STRINGTABLE
+BEGIN
+  IDS_TYPE_MEMORY           "Memory"
+  IDS_TYPE_PORT             "Input/output (IO)"
+  IDS_TYPE_DMA              "Direct Memory Access (DMA)"
+  IDS_TYPE_IRQ              "Interrupt request (IRQ)"
+END
+
 /* Hints */
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_HINT_BLANK        " "
   IDS_HINT_PROPERTIES   " Şimdiki seçilen için özellik penceresini açar."

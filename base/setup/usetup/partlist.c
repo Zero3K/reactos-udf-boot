@@ -49,36 +49,14 @@ GetPartitionTypeString(
     }
     else
     {
-        UINT i;
-
         /* Do the table lookup */
-        if (PartEntry->DiskEntry->DiskStyle == PARTITION_STYLE_MBR)
+        PCSTR Description = LookupPartitionTypeString(PartEntry->DiskEntry->DiskStyle,
+                                                      &PartEntry->PartitionType);
+        if (Description)
         {
-            for (i = 0; i < ARRAYSIZE(MbrPartitionTypes); ++i)
-            {
-                if (PartEntry->PartitionType == MbrPartitionTypes[i].Type)
-                {
-                    RtlStringCchCopyA(strBuffer, cchBuffer,
-                                      MbrPartitionTypes[i].Description);
-                    return;
-                }
-            }
+            RtlStringCchCopyA(strBuffer, cchBuffer, Description);
+            return;
         }
-#if 0 // TODO: GPT support!
-        else if (PartEntry->DiskEntry->DiskStyle == PARTITION_STYLE_GPT)
-        {
-            for (i = 0; i < ARRAYSIZE(GptPartitionTypes); ++i)
-            {
-                if (IsEqualPartitionType(PartEntry->PartitionType,
-                                         GptPartitionTypes[i].Guid))
-                {
-                    RtlStringCchCopyA(strBuffer, cchBuffer,
-                                      GptPartitionTypes[i].Description);
-                    return;
-                }
-            }
-        }
-#endif
 
         /* We are here because the partition type is unknown */
         if (cchBuffer > 0) *strBuffer = '\0';
@@ -154,6 +132,7 @@ PartitionDescription(
     size_t cchBufferSize = cchBuffer;
     ULONGLONG PartSize;
     PCSTR Unit;
+    PVOLINFO VolInfo = (PartEntry->Volume ? &PartEntry->Volume->Info : NULL);
 
     /* Get the partition size */
     PartSize = GetPartEntrySizeInBytes(PartEntry);
@@ -204,8 +183,8 @@ PartitionDescription(
     RtlStringCchPrintfExA(pBuffer, cchBufferSize,
                           &pBuffer, &cchBufferSize, 0,
                           "%c%c %c %s(%lu) ",
-                          (PartEntry->DriveLetter == 0) ? '-' : (CHAR)PartEntry->DriveLetter,
-                          (PartEntry->DriveLetter == 0) ? '-' : ':',
+                          !(VolInfo && VolInfo->DriveLetter) ? '-' : (CHAR)VolInfo->DriveLetter,
+                          !(VolInfo && VolInfo->DriveLetter) ? '-' : ':',
                           PartEntry->BootIndicator ? '*' : ' ',
                           PartEntry->LogicalPartition ? "  " : "", // Optional indentation
                           PartEntry->PartitionNumber);
@@ -215,16 +194,15 @@ PartitionDescription(
      * (if any) and the file system name. Otherwise, display the partition
      * type if it's not a new partition.
      */
-    if (!PartEntry->New && *PartEntry->FileSystem &&
-        _wcsicmp(PartEntry->FileSystem, L"RAW") != 0)
+    if (VolInfo && IsFormatted(VolInfo))
     {
         size_t cchLabelSize = 0;
-        if (*PartEntry->VolumeLabel)
+        if (*VolInfo->VolumeLabel)
         {
             RtlStringCchPrintfExA(pBuffer, cchBufferSize,
                                   &pBuffer, &cchLabelSize, 0,
                                   "\"%-.11S\" ",
-                                  PartEntry->VolumeLabel);
+                                  VolInfo->VolumeLabel);
             cchLabelSize = cchBufferSize - cchLabelSize; // Actual length of the label part.
             cchBufferSize -= cchLabelSize; // And reset cchBufferSize to what it should be.
         }
@@ -237,7 +215,7 @@ PartitionDescription(
                               /* The minimum length can be at most 11 since
                                * cchLabelSize can be at most == 11 + 3 == 14 */
                               25 - min(cchLabelSize, 25),
-                              PartEntry->FileSystem);
+                              VolInfo->FileSystem);
     }
     else
     {
@@ -275,7 +253,7 @@ PartitionDescription(
     /* Show the remaining free space only if a FS is mounted */
     // FIXME: We don't support that yet!
 #if 0
-    if (*PartEntry->FileSystem)
+    if (VolInfo && *VolInfo->FileSystem)
     {
         RtlStringCchPrintfA(pBuffer, cchBufferSize,
                             "%*s%6I64u %s (%6I64u %s %s)",

@@ -90,7 +90,6 @@ typedef PCHAR
     IN ULONG Length
 );
 
-extern KAFFINITY KeActiveProcessors;
 extern PKNMI_HANDLER_CALLBACK KiNmiCallbackListHead;
 extern KSPIN_LOCK KiNmiCallbackListLock;
 extern PVOID KeUserApcDispatcher;
@@ -103,7 +102,14 @@ extern BOOLEAN ExCmosClockIsSane;
 extern USHORT KeProcessorArchitecture;
 extern USHORT KeProcessorLevel;
 extern USHORT KeProcessorRevision;
-extern ULONG KeFeatureBits;
+extern ULONG64 KeFeatureBits;
+extern KAFFINITY KeActiveProcessors;
+extern PKPRCB KiProcessorBlock[];
+#ifdef CONFIG_SMP
+extern ULONG KeMaximumProcessors;
+extern ULONG KeNumprocSpecified;
+extern ULONG KeBootprocSpecified;
+#endif
 extern KNODE KiNode0;
 extern PKNODE KeNodeBlock[1];
 extern UCHAR KeNumberNodes;
@@ -136,7 +142,6 @@ extern LIST_ENTRY KiProcessListHead;
 extern LIST_ENTRY KiProcessInSwapListHead, KiProcessOutSwapListHead;
 extern LIST_ENTRY KiStackInSwapListHead;
 extern KEVENT KiSwapEvent;
-extern PKPRCB KiProcessorBlock[];
 extern KAFFINITY KiIdleSummary;
 extern PVOID KeUserApcDispatcher;
 extern PVOID KeUserCallbackDispatcher;
@@ -381,10 +386,6 @@ KeFindNextRightSetAffinity(
     IN UCHAR Number,
     IN KAFFINITY Set
 );
-
-VOID
-NTAPI
-DbgBreakPointNoBugCheck(VOID);
 
 VOID
 NTAPI
@@ -1061,14 +1062,14 @@ KiSystemFatalException(
 
 PVOID
 NTAPI
-KiPcToFileHeader(IN PVOID Eip,
+KiPcToFileHeader(IN PVOID Pc,
                  OUT PLDR_DATA_TABLE_ENTRY *LdrEntry,
                  IN BOOLEAN DriversOnly,
                  OUT PBOOLEAN InKernel);
 
 PVOID
 NTAPI
-KiRosPcToUserFileHeader(IN PVOID Eip,
+KiRosPcToUserFileHeader(IN PVOID Pc,
                         OUT PLDR_DATA_TABLE_ENTRY *LdrEntry);
 
 PCHAR
@@ -1078,6 +1079,14 @@ KeBugCheckUnicodeToAnsi(
     OUT PCHAR Ansi,
     IN ULONG Length
 );
+
+#ifdef CONFIG_SMP
+ULONG
+NTAPI
+KiFindIdealProcessor(
+    _In_ KAFFINITY ProcessorSet,
+    _In_ UCHAR OriginalIdealProcessor);
+#endif // CONFIG_SMP
 
 #ifdef __cplusplus
 } // extern "C"

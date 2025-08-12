@@ -313,10 +313,10 @@
 @ stdcall SetupDiGetClassImageListExW(ptr wstr ptr)
 @ stdcall SetupDiGetClassInstallParamsA(ptr ptr ptr long ptr)
 @ stdcall SetupDiGetClassInstallParamsW(ptr ptr ptr long ptr)
-@ stub SetupDiGetClassRegistryPropertyA
-@ stub SetupDiGetClassRegistryPropertyW
-@ stub SetupDiGetCustomDevicePropertyA
-@ stub SetupDiGetCustomDevicePropertyW
+@ stdcall SetupDiGetClassRegistryPropertyA(ptr long ptr ptr long ptr str ptr)
+@ stdcall SetupDiGetClassRegistryPropertyW(ptr long ptr ptr long ptr wstr ptr)
+@ stdcall SetupDiGetCustomDevicePropertyA(ptr ptr str long ptr ptr long ptr)
+@ stdcall SetupDiGetCustomDevicePropertyW(ptr ptr wstr long ptr ptr long ptr)
 @ stdcall SetupDiGetDeviceInfoListClass(ptr ptr)
 @ stdcall SetupDiGetDeviceInfoListDetailA(ptr ptr)
 @ stdcall SetupDiGetDeviceInfoListDetailW(ptr ptr)
@@ -374,8 +374,8 @@
 @ stub SetupDiSelectOEMDrv
 @ stdcall SetupDiSetClassInstallParamsA(ptr ptr ptr long)
 @ stdcall SetupDiSetClassInstallParamsW(ptr ptr ptr long)
-@ stub SetupDiSetClassRegistryPropertyA
-@ stub SetupDiSetClassRegistryPropertyW
+@ stdcall SetupDiSetClassRegistryPropertyA(ptr long ptr long str ptr)
+@ stdcall SetupDiSetClassRegistryPropertyW(ptr long ptr long wstr ptr)
 @ stdcall SetupDiSetDeviceInstallParamsA(ptr ptr ptr)
 @ stdcall SetupDiSetDeviceInstallParamsW(ptr ptr ptr)
 @ stub SetupDiSetDeviceInterfaceDefault
@@ -475,8 +475,8 @@
 @ stdcall SetupQueryInfFileInformationW(ptr long wstr long ptr)
 @ stdcall SetupQueryInfOriginalFileInformationA(ptr long ptr ptr)
 @ stdcall SetupQueryInfOriginalFileInformationW(ptr long ptr ptr)
-@ stub SetupQueryInfVersionInformationA
-@ stub SetupQueryInfVersionInformationW
+@ stdcall SetupQueryInfVersionInformationA(ptr long str ptr long ptr)
+@ stdcall SetupQueryInfVersionInformationW(ptr long wstr ptr long ptr)
 @ stub SetupQuerySourceListA
 @ stub SetupQuerySourceListW
 @ stdcall SetupQuerySpaceRequiredOnDriveA(long str ptr ptr long)

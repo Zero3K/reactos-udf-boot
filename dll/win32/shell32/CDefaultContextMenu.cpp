@@ -23,11 +23,6 @@ SHELL_GetRegCLSID(HKEY hKey, LPCWSTR SubKey, LPCWSTR Value, CLSID &clsid)
     return !err ? CLSIDFromString(buf, &clsid) : HRESULT_FROM_WIN32(err);
 }
 
-static inline bool RegValueExists(HKEY hKey, LPCWSTR Name)
-{
-    return RegQueryValueExW(hKey, Name, NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
-}
-
 static BOOL InsertMenuItemAt(HMENU hMenu, UINT Pos, UINT Flags)
 {
     MENUITEMINFOW mii;
@@ -35,6 +30,112 @@ static BOOL InsertMenuItemAt(HMENU hMenu, UINT Pos, UINT Flags)
     mii.fMask = MIIM_TYPE;
     mii.fType = Flags;
     return InsertMenuItemW(hMenu, Pos, TRUE, &mii);
+}
+
+static void DCMA_DestroyEntry(DCMENTRY &dcme)
+{
+    if (!dcme.pCM)
+        return;
+    IUnknown_SetSite(dcme.pCM, NULL);
+    dcme.pCM->Release();
+    dcme.pCM = NULL;
+}
+
+void DCMA_Destroy(HDCMA hDCMA)
+{
+    UINT i = 0;
+    for (DCMENTRY *p; (p = DCMA_GetEntry(hDCMA, i)) != NULL; ++i)
+        DCMA_DestroyEntry(*p);
+    DSA_Destroy(hDCMA);
+}
+
+UINT DCMA_InsertMenuItems(
+    _In_ HDCMA hDCMA,
+    _In_ HDCIA hDCIA,
+    _In_opt_ LPCITEMIDLIST pidlFolder,
+    _In_opt_ IDataObject *pDO,
+    _In_opt_ HKEY *pKeys,
+    _In_opt_ UINT nKeys,
+    _In_ QCMINFO *pQCMI,
+    _In_opt_ UINT fCmf,
+    _In_opt_ IUnknown *pUnkSite)
+{
+    UINT idCmdBase = pQCMI->idCmdFirst, idCmdFirst = idCmdBase;
+    UINT nOffset = 0;
+
+    // Insert in reverse order
+    for (int iCls = DCIA_GetCount(hDCIA) - 1; iCls >= 0; --iCls)
+    {
+        REFCLSID clsid = *DCIA_GetEntry(hDCIA, iCls);
+        if (fCmf & CMF_DEFAULTONLY)
+        {
+            WCHAR szKey[MAX_PATH];
+            wcscpy(szKey, L"CLSID\\");
+            StringFromGUID2(clsid, szKey + _countof(L"CLSID\\") - 1, CHARS_IN_GUID);
+            wcscpy(szKey + _countof(L"CLSID\\") - 1 + CHARS_IN_GUID - 1, L"\\shellex\\MayChangeDefaultMenu");
+            if (!RegKeyExists(HKEY_CLASSES_ROOT, szKey))
+                continue;
+        }
+
+        for (UINT iKey = 0; iKey < nKeys; ++iKey)
+        {
+            CComPtr<IShellExtInit> pInit;
+            HRESULT hr = SHExtCoCreateInstance(NULL, &clsid, NULL, IID_PPV_ARG(IShellExtInit, &pInit));
+            if (FAILED(hr))
+                break;
+            if (FAILED(hr = pInit->Initialize(pidlFolder, pDO, pKeys[iKey])))
+                continue;
+
+            IContextMenu *pCM;
+            if (FAILED(hr = pInit->QueryInterface(IID_PPV_ARG(IContextMenu, &pCM))))
+                break;
+            IUnknown_SetSite(pCM, pUnkSite);
+
+            hr = pCM->QueryContextMenu(pQCMI->hmenu, pQCMI->indexMenu + nOffset, idCmdFirst, pQCMI->idCmdLast, fCmf);
+            const UINT nCount = HRESULT_CODE(hr);
+            const UINT idThisFirst = idCmdFirst - idCmdBase;
+            DCMENTRY dcme = { pCM, idThisFirst, idThisFirst + nCount - 1 };
+            if (hr > 0)
+            {
+                idCmdFirst += nCount;
+                if (DSA_AppendItem(hDCMA, &dcme) >= 0)
+                {
+                    if (nOffset == 0 && GetMenuDefaultItem(pQCMI->hmenu, TRUE, 0) == 0)
+                        nOffset++; // Insert new items below the default
+                    break;
+                }
+            }
+            DCMA_DestroyEntry(dcme);
+        }
+    }
+    return idCmdFirst;
+}
+
+HRESULT DCMA_InvokeCommand(HDCMA hDCMA, CMINVOKECOMMANDINFO *pICI)
+{
+    HRESULT hr = S_FALSE;
+    for (UINT i = 0;; ++i)
+    {
+        DCMENTRY *p = DCMA_GetEntry(hDCMA, i);
+        if (!p)
+            return hr;
+
+        UINT id = LOWORD(pICI->lpVerb);
+        if (!IS_INTRESOURCE(pICI->lpVerb))
+        {
+            if (SUCCEEDED(hr = p->pCM->InvokeCommand(pICI)))
+                return hr;
+        }
+        else if (id >= p->idCmdFirst && id <= p->idCmdLast)
+        {
+            CMINVOKECOMMANDINFOEX ici;
+            CopyMemory(&ici, pICI, min(sizeof(ici), pICI->cbSize));
+            ici.cbSize = min(sizeof(ici), pICI->cbSize);
+            ici.lpVerb = MAKEINTRESOURCEA(id - p->idCmdFirst);
+            ici.lpVerbW = (PWSTR)ici.lpVerb;
+            return p->pCM->InvokeCommand((CMINVOKECOMMANDINFO*)&ici);
+        }
+    }
 }
 
 typedef struct _DynamicShellEntry_
@@ -63,10 +164,10 @@ static const struct _StaticInvokeCommandMap_
     SHORT DfmCmd;
 } g_StaticInvokeCmdMap[] =
 {
-    { "RunAs", 0 },  // Unimplemented
-    { "Print", 0 },  // Unimplemented
-    { "Preview", 0 }, // Unimplemented
-    { "Open",            FCIDM_SHVIEW_OPEN },
+    { "runas", 0 },  // Unimplemented
+    { "print", 0 },  // Unimplemented
+    { "preview", 0 }, // Unimplemented
+    { "open",            FCIDM_SHVIEW_OPEN },
     { CMDSTR_NEWFOLDERA, FCIDM_SHVIEW_NEWFOLDER,  (SHORT)DFM_CMD_NEWFOLDER },
     { "cut",             FCIDM_SHVIEW_CUT,        /* ? */ },
     { "copy",            FCIDM_SHVIEW_COPY,       (SHORT)DFM_CMD_COPY },
@@ -79,6 +180,16 @@ static const struct _StaticInvokeCommandMap_
     { "moveto",          FCIDM_SHVIEW_MOVETO },
 };
 
+PCSTR MapFcidmCmdToVerb(_In_ UINT_PTR CmdId)
+{
+    for (SIZE_T i = 0; i < _countof(g_StaticInvokeCmdMap); ++i)
+    {
+        if (g_StaticInvokeCmdMap[i].IntVerb == CmdId && CmdId)
+            return g_StaticInvokeCmdMap[i].szStringVerb;
+    }
+    return NULL;
+}
+
 UINT MapVerbToDfmCmd(_In_ LPCSTR verba)
 {
     for (UINT i = 0; i < _countof(g_StaticInvokeCmdMap); ++i)
@@ -87,6 +198,25 @@ UINT MapVerbToDfmCmd(_In_ LPCSTR verba)
             return (int)g_StaticInvokeCmdMap[i].DfmCmd;
     }
     return 0;
+}
+
+static HRESULT
+MapVerbToCmdId(PVOID Verb, BOOL IsUnicode, IContextMenu *pCM, UINT idFirst, UINT idLast)
+{
+    const UINT gcs = IsUnicode ? GCS_VERBW : GCS_VERBA;
+    for (UINT id = idFirst; id <= idLast; ++id)
+    {
+        WCHAR buf[MAX_PATH];
+        *buf = UNICODE_NULL;
+        HRESULT hr = pCM->GetCommandString(id, gcs, NULL, (LPSTR)buf, _countof(buf));
+        if (FAILED(hr) || !*buf)
+            continue;
+        else if (IsUnicode && !_wcsicmp((LPWSTR)Verb, buf))
+            return id;
+        else if (!IsUnicode && !lstrcmpiA((LPSTR)Verb, (LPSTR)buf))
+            return id;
+    }
+    return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
 }
 
 static inline bool IsVerbListSeparator(WCHAR Ch)
@@ -125,6 +255,36 @@ EXTERN_C HRESULT SHELL32_EnumDefaultVerbList(LPCWSTR List, UINT Index, LPWSTR Ve
     return HRESULT_FROM_WIN32(ERROR_NO_MORE_ITEMS);
 }
 
+static HRESULT GetFriendlyVerb(_In_ PCWSTR pszVerb, _Out_ PWSTR pszBuf, _In_ SIZE_T cchMax)
+{
+    static const struct { PCWSTR pszVerb; WORD iResId; } map[] =
+    {
+        // { L"open", IDS_OPEN_VERB }, These two have already been handled
+        // { L"explore", IDS_EXPLORE_VERB },
+        { L"edit", IDS_EDIT_VERB },
+        { L"print", IDS_PRINT_VERB },
+        { L"runas", IDS_RUNAS_VERB },
+        { L"openas", IDS_OPEN_VERB },
+        { L"find", IDS_FIND_VERB },
+    };
+    for (SIZE_T i = 0; i < _countof(map); ++i)
+    {
+        if (!_wcsicmp(pszVerb, map[i].pszVerb) &&
+            LoadStringW(shell32_hInstance, map[i].iResId, pszBuf, cchMax))
+        {
+            return S_OK;
+        }
+    }
+
+    // Try to make a friendly verb based on the verb subkey
+    if (pszVerb[0] < 127 && !StrChrW(pszVerb, '&') && SUCCEEDED(StringCchCopyW(pszBuf + 1, --cchMax, pszVerb)))
+    {
+        *pszBuf = L'&';
+        return S_OK; // This can be changed to S_FALSE if the caller needs to know we faked it
+    }
+    return E_FAIL;
+}
+
 class CDefaultContextMenu :
     public CComObjectRootEx<CComMultiThreadModelNoCS>,
     public IContextMenu3,
@@ -139,10 +299,11 @@ class CDefaultContextMenu :
         UINT m_cidl;
         PCUITEMID_CHILD_ARRAY m_apidl;
         CComPtr<IDataObject> m_pDataObj;
-        HKEY* m_aKeys;
+        HKEY m_aKeys[16]; // This limit is documented for both the old API and for DEFCONTEXTMENU
         UINT m_cKeys;
         PIDLIST_ABSOLUTE m_pidlFolder;
         DWORD m_bGroupPolicyActive;
+        UINT m_iIdQCMFirst; /* The first id passed to us in QueryContextMenu */
         CAtlList<DynamicShellEntry> m_DynamicEntries;
         UINT m_iIdSHEFirst; /* first used id */
         UINT m_iIdSHELast; /* last used id */
@@ -157,6 +318,7 @@ class CDefaultContextMenu :
         WCHAR m_DefVerbs[MAX_PATH];
 
         HRESULT _DoCallback(UINT uMsg, WPARAM wParam, LPVOID lParam);
+        HRESULT _DoInvokeCommandCallback(LPCMINVOKECOMMANDINFOEX lpcmi, WPARAM CmdId);
         void AddStaticEntry(const HKEY hkeyClass, const WCHAR *szVerb, UINT uFlags);
         void AddStaticEntriesForKey(HKEY hKey, UINT uFlags);
         void TryPickDefault(HMENU hMenu, UINT idCmdFirst, UINT DfltOffset, UINT uFlags);
@@ -204,7 +366,7 @@ class CDefaultContextMenu :
         STDMETHOD(GetSite)(REFIID riid, void **ppvSite) override;
 
         // IServiceProvider
-        virtual HRESULT STDMETHODCALLTYPE QueryService(REFGUID svc, REFIID riid, void**ppv)
+        STDMETHOD(QueryService)(REFGUID svc, REFIID riid, void**ppv) override
         {
             return IUnknown_QueryService(m_site, svc, riid, ppv);
         }
@@ -225,10 +387,10 @@ CDefaultContextMenu::CDefaultContextMenu() :
     m_cidl(0),
     m_apidl(NULL),
     m_pDataObj(NULL),
-    m_aKeys(NULL),
-    m_cKeys(NULL),
+    m_cKeys(0),
     m_pidlFolder(NULL),
     m_bGroupPolicyActive(0),
+    m_iIdQCMFirst(0),
     m_iIdSHEFirst(0),
     m_iIdSHELast(0),
     m_iIdSCMFirst(0),
@@ -254,7 +416,6 @@ CDefaultContextMenu::~CDefaultContextMenu()
 
     for (UINT i = 0; i < m_cKeys; i++)
         RegCloseKey(m_aKeys[i]);
-    HeapFree(GetProcessHeap(), 0, m_aKeys);
 
     if (m_pidlFolder)
         CoTaskMemFree(m_pidlFolder);
@@ -265,6 +426,7 @@ HRESULT WINAPI CDefaultContextMenu::Initialize(const DEFCONTEXTMENU *pdcm, LPFND
 {
     TRACE("cidl %u\n", pdcm->cidl);
 
+    HRESULT hr = S_OK;
     if (!pdcm->pcmcb && !lpfn)
     {
         ERR("CDefaultContextMenu needs a callback!\n");
@@ -280,13 +442,14 @@ HRESULT WINAPI CDefaultContextMenu::Initialize(const DEFCONTEXTMENU *pdcm, LPFND
     m_pfnmcb = lpfn;
     m_hwnd = pdcm->hwnd;
 
-    m_cKeys = pdcm->cKeys;
-    if (pdcm->cKeys)
+    for (UINT i = 0; i < pdcm->cKeys; ++i)
     {
-        m_aKeys = (HKEY*)HeapAlloc(GetProcessHeap(), 0, sizeof(HKEY) * pdcm->cKeys);
-        if (!m_aKeys)
-            return E_OUTOFMEMORY;
-        memcpy(m_aKeys, pdcm->aKeys, sizeof(HKEY) * pdcm->cKeys);
+        if (i >= _countof(m_aKeys))
+            hr = E_INVALIDARG;
+        else if ((m_aKeys[i] = SHRegDuplicateHKey(pdcm->aKeys[i])) != NULL)
+            m_cKeys++;
+        else
+            hr = E_OUTOFMEMORY;
     }
 
     m_psf->GetUIObjectOf(pdcm->hwnd, m_cidl, m_apidl, IID_NULL_PPV_ARG(IDataObject, &m_pDataObj));
@@ -306,7 +469,7 @@ HRESULT WINAPI CDefaultContextMenu::Initialize(const DEFCONTEXTMENU *pdcm, LPFND
         TRACE("pidlFolder %p\n", m_pidlFolder);
     }
 
-    return S_OK;
+    return hr;
 }
 
 HRESULT CDefaultContextMenu::_DoCallback(UINT uMsg, WPARAM wParam, LPVOID lParam)
@@ -338,7 +501,7 @@ void CDefaultContextMenu::AddStaticEntry(const HKEY hkeyClass, const WCHAR *szVe
 
     TRACE("adding verb %s\n", debugstr_w(szVerb));
 
-    if (!wcsicmp(szVerb, L"open") && !(uFlags & CMF_NODEFAULT))
+    if (!_wcsicmp(szVerb, L"open") && !(uFlags & CMF_NODEFAULT))
     {
         /* open verb is always inserted in front */
         m_StaticEntries.AddHead({ szVerb, hkeyClass });
@@ -555,9 +718,8 @@ CDefaultContextMenu::AddStaticContextMenusToMenu(
 {
     UINT ntver = RosGetProcessEffectiveVersion();
     MENUITEMINFOW mii = { sizeof(mii) };
-    UINT idResource;
     WCHAR wszDispVerb[80]; // The limit on XP. If the friendly string is longer, it falls back to the verb key.
-    UINT fState;
+    UINT fState, idVerbRes;
     UINT cIds = 0, indexFirst = *pIndexMenu, indexDefault;
     int iDefVerbIndex = -1;
 
@@ -570,6 +732,7 @@ CDefaultContextMenu::AddStaticContextMenusToMenu(
     {
         StaticShellEntry& info = m_StaticEntries.GetNext(it);
         BOOL forceFirstPos = FALSE;
+        bool hide = false;
 
         fState = MFS_ENABLED;
 
@@ -582,86 +745,59 @@ CDefaultContextMenu::AddStaticContextMenusToMenu(
 
         if (info.Verb.CompareNoCase(L"open") == 0)
         {
-            idResource = IDS_OPEN_VERB;
+            idVerbRes = IDS_OPEN_VERB; // TODO: This string should include '&'
             fState |= MFS_DEFAULT; /* override default when open verb is found */
             forceFirstPos++;
         }
         else if (info.Verb.CompareNoCase(L"explore") == 0)
         {
-            idResource = IDS_EXPLORE_VERB;
+            idVerbRes = IDS_EXPLORE_VERB; // TODO: This string should include '&'
             if (uFlags & CMF_EXPLORE)
             {
                 fState |= MFS_DEFAULT;
                 forceFirstPos++;
             }
         }
-        else if (info.Verb.CompareNoCase(L"runas") == 0)
-            idResource = IDS_RUNAS_VERB;
-        else if (info.Verb.CompareNoCase(L"edit") == 0)
-            idResource = IDS_EDIT_VERB;
-        else if (info.Verb.CompareNoCase(L"find") == 0)
-            idResource = IDS_FIND_VERB;
-        else if (info.Verb.CompareNoCase(L"print") == 0)
-            idResource = IDS_PRINT_VERB;
         else if (info.Verb.CompareNoCase(L"printto") == 0)
-            continue;
+            hide = true;
         else
-            idResource = 0;
+            idVerbRes = 0;
 
         /* By default use verb for menu item name */
         mii.dwTypeData = (LPWSTR)info.Verb.GetString();
 
         WCHAR wszKey[sizeof("shell\\") + MAX_VERB];
-        HRESULT hr;
-        hr = StringCbPrintfW(wszKey, sizeof(wszKey), L"shell\\%s", info.Verb.GetString());
+        HRESULT hr = StringCbPrintfW(wszKey, sizeof(wszKey), L"shell\\%s", info.Verb.GetString());
         if (FAILED_UNEXPECTEDLY(hr))
-        {
-            continue;
-        }
+            hide = true;
 
         UINT cmdFlags = 0;
-        bool hide = false;
         HKEY hkVerb;
-        if (idResource > 0)
+        if (RegOpenKeyExW(info.hkClass, wszKey, 0, KEY_READ, &hkVerb) == ERROR_SUCCESS)
         {
             if (!(uFlags & CMF_OPTIMIZEFORINVOKE))
             {
-                if (LoadStringW(shell32_hInstance, idResource, wszDispVerb, _countof(wszDispVerb)))
-                    mii.dwTypeData = wszDispVerb; /* use translated verb */
-                else
-                    ERR("Failed to load string\n");
-            }
+                DWORD cbVerb = sizeof(wszDispVerb);
+                LONG res = RegLoadMUIStringW(hkVerb, L"MUIVerb", wszDispVerb, cbVerb, NULL, 0, NULL);
+                if (res || !*wszDispVerb)
+                    res = RegLoadMUIStringW(hkVerb, NULL, wszDispVerb, cbVerb, NULL, 0, NULL);
 
-            if (RegOpenKeyW(info.hkClass, wszKey, &hkVerb) != ERROR_SUCCESS)
-                hkVerb = NULL;
+                if ((res == ERROR_SUCCESS && *wszDispVerb) ||
+                    (idVerbRes && LoadStringW(shell32_hInstance, idVerbRes, wszDispVerb, _countof(wszDispVerb))) ||
+                    SUCCEEDED(GetFriendlyVerb(info.Verb, wszDispVerb, _countof(wszDispVerb))))
+                {
+                    mii.dwTypeData = wszDispVerb;
+                }
+            }
         }
         else
         {
-            if (RegOpenKeyW(info.hkClass, wszKey, &hkVerb) == ERROR_SUCCESS)
-            {
-                if (!(uFlags & CMF_OPTIMIZEFORINVOKE))
-                {
-                    DWORD cbVerb = sizeof(wszDispVerb);
-                    LONG res = RegLoadMUIStringW(hkVerb, L"MUIVerb", wszDispVerb, cbVerb, NULL, 0, NULL);
-                    if (res || !*wszDispVerb)
-                        res = RegLoadMUIStringW(hkVerb, NULL, wszDispVerb, cbVerb, NULL, 0, NULL);
-
-                    if (res == ERROR_SUCCESS && *wszDispVerb)
-                    {
-                        /* use description for the menu entry */
-                        mii.dwTypeData = wszDispVerb;
-                    }
-                }
-            }
-            else
-            {
-                hkVerb = NULL;
-            }
+            hkVerb = NULL;
         }
 
         if (hkVerb)
         {
-            if (!(uFlags & CMF_EXTENDEDVERBS))
+            if (!hide && !(uFlags & CMF_EXTENDEDVERBS))
                 hide = RegValueExists(hkVerb, L"Extended");
 
             if (!hide)
@@ -669,6 +805,9 @@ CDefaultContextMenu::AddStaticContextMenusToMenu(
 
             if (!hide && !(uFlags & CMF_DISABLEDVERBS))
                 hide = RegValueExists(hkVerb, L"LegacyDisable");
+
+            if (DWORD dwRest = (hide ? 0 : RegGetDword(hkVerb, NULL, L"SuppressionPolicy", 0)))
+                hide = SHRestricted((RESTRICTIONS)dwRest);
 
             if (RegValueExists(hkVerb, L"NeverDefault"))
                 fState &= ~MFS_DEFAULT;
@@ -742,7 +881,7 @@ CDefaultContextMenu::AddStaticContextMenusToMenu(
     return cIds;
 }
 
-void WINAPI _InsertMenuItemW(
+BOOL WINAPI _InsertMenuItemW(
     HMENU hMenu,
     UINT indexMenu,
     BOOL fByPosition,
@@ -768,7 +907,7 @@ void WINAPI _InsertMenuItemW(
             else
             {
                 ERR("failed to load string %p\n", dwTypeData);
-                return;
+                return FALSE;
             }
         }
         else
@@ -778,7 +917,7 @@ void WINAPI _InsertMenuItemW(
 
     mii.wID = wID;
     mii.fType = fType;
-    InsertMenuItemW(hMenu, indexMenu, fByPosition, &mii);
+    return InsertMenuItemW(hMenu, indexMenu, fByPosition, &mii);
 }
 
 void
@@ -826,7 +965,7 @@ CDefaultContextMenu::QueryContextMenu(
     UINT uFlags)
 {
     HRESULT hr;
-    UINT idCmdNext = idCmdFirst;
+    UINT idCmdNext = m_iIdQCMFirst = idCmdFirst;
     UINT cIds = 0;
 
     TRACE("BuildShellItemContextMenu entered\n");
@@ -876,7 +1015,7 @@ CDefaultContextMenu::QueryContextMenu(
             return MAKE_HRESULT(SEVERITY_SUCCESS, 0, cIds);
 
         /* Add the default part of the menu */
-        HMENU hmenuDefault = LoadMenu(_AtlBaseModule.GetResourceInstance(), L"MENU_SHV_FILE");
+        HMENU hmenuDefault = LoadMenuW(_AtlBaseModule.GetResourceInstance(), MAKEINTRESOURCEW(MENU_SHV_FILE));
 
         /* Remove uneeded entries */
         if (!(rfg & SFGAO_CANMOVE))
@@ -906,6 +1045,11 @@ CDefaultContextMenu::QueryContextMenu(
     TryPickDefault(hMenu, idCmdFirst, idDefaultOffset, uFlags);
 
     // TODO: DFM_MERGECONTEXTMENU_TOP
+
+    // TODO: Remove duplicate verbs. This will be easier when the static items handling
+    // has been moved to CLSID_ShellFileDefExt so we only have to deal with ShellEx.
+    // This is a Windows XP+ feature. On an unknown file type, Windows 2000 will
+    // display both "Open" (openas from Unknown) and "Open with..." (openas from *).
 
     return MAKE_HRESULT(SEVERITY_SUCCESS, 0, cIds);
 }
@@ -1016,10 +1160,16 @@ HRESULT CDefaultContextMenu::DoCopyOrCut(LPCMINVOKECOMMANDINFOEX lpcmi, BOOL bCo
     GlobalUnlock(medium.hGlobal);
     m_pDataObj->SetData(&formatetc, &medium, TRUE);
 
+    CComPtr<IShellFolderView> psfv;
+    if (SUCCEEDED(IUnknown_QueryService(m_site, SID_SFolderView, IID_PPV_ARG(IShellFolderView, &psfv))))
+        psfv->SetPoints(m_pDataObj);
+
     HRESULT hr = OleSetClipboard(m_pDataObj);
     if (FAILED_UNEXPECTEDLY(hr))
         return hr;
 
+    if (psfv)
+        psfv->SetClipboard(!bCopy);
     return S_OK;
 }
 
@@ -1053,7 +1203,7 @@ HRESULT
 CDefaultContextMenu::DoProperties(
     LPCMINVOKECOMMANDINFOEX lpcmi)
 {
-    HRESULT hr = _DoCallback(DFM_INVOKECOMMAND, DFM_CMD_PROPERTIES, NULL);
+    HRESULT hr = _DoInvokeCommandCallback(lpcmi, DFM_CMD_PROPERTIES);
 
     // We are asked to run the default property sheet
     if (hr == S_FALSE)
@@ -1146,7 +1296,7 @@ CDefaultContextMenu::DoCreateNewFolder(
         return S_OK;
 
     /* Get a pointer to the shell view */
-    hr = IUnknown_QueryService(m_site, SID_IFolderView, IID_PPV_ARG(IShellView, &psv));
+    hr = IUnknown_QueryService(m_site, SID_SFolderView, IID_PPV_ARG(IShellView, &psv));
     if (FAILED_UNEXPECTEDLY(hr))
         return S_OK;
 
@@ -1199,7 +1349,7 @@ CDefaultContextMenu::MapVerbToCmdId(PVOID Verb, PUINT idCmd, BOOL IsUnicode)
         {
             /* The static verbs are ANSI, get a unicode version before doing the compare */
             SHAnsiToUnicode(g_StaticInvokeCmdMap[i].szStringVerb, UnicodeStr, MAX_VERB);
-            if (!wcscmp(UnicodeStr, (LPWSTR)Verb))
+            if (!_wcsicmp(UnicodeStr, (LPWSTR)Verb))
             {
                 /* Return the Corresponding Id */
                 *idCmd = g_StaticInvokeCmdMap[i].IntVerb;
@@ -1208,7 +1358,7 @@ CDefaultContextMenu::MapVerbToCmdId(PVOID Verb, PUINT idCmd, BOOL IsUnicode)
         }
         else
         {
-            if (!strcmp(g_StaticInvokeCmdMap[i].szStringVerb, (LPSTR)Verb))
+            if (!_stricmp(g_StaticInvokeCmdMap[i].szStringVerb, (LPSTR)Verb))
             {
                 *idCmd = g_StaticInvokeCmdMap[i].IntVerb;
                 return TRUE;
@@ -1216,6 +1366,18 @@ CDefaultContextMenu::MapVerbToCmdId(PVOID Verb, PUINT idCmd, BOOL IsUnicode)
         }
     }
 
+    for (POSITION it = m_DynamicEntries.GetHeadPosition(); it != NULL;)
+    {
+        DynamicShellEntry& entry = m_DynamicEntries.GetNext(it);
+        if (!entry.NumIds)
+            continue;
+        HRESULT hr = ::MapVerbToCmdId(Verb, IsUnicode, entry.pCM, 0, entry.NumIds - 1);
+        if (SUCCEEDED(hr))
+        {
+            *idCmd = m_iIdSHEFirst + entry.iIdCmdFirst + hr;
+            return TRUE;
+        }
+    }
     return FALSE;
 }
 
@@ -1243,8 +1405,6 @@ CDefaultContextMenu::BrowserFlagsFromVerb(LPCMINVOKECOMMANDINFOEX lpcmi, PStatic
     LPCWSTR FlagsName;
     WCHAR wszKey[sizeof("shell\\") + MAX_VERB];
     HRESULT hr;
-    DWORD wFlags;
-    DWORD cbVerb;
 
     if (!m_site)
         return 0;
@@ -1260,18 +1420,18 @@ CDefaultContextMenu::BrowserFlagsFromVerb(LPCMINVOKECOMMANDINFOEX lpcmi, PStatic
     else
         FlagsName = L"BrowserFlags";
 
+    CComPtr<ICommDlgBrowser> pcdb;
+    if (SUCCEEDED(psb->QueryInterface(IID_PPV_ARG(ICommDlgBrowser, &pcdb))))
+    {
+        if (LOBYTE(GetVersion()) < 6 || FlagsName[0] == 'E')
+            return 0; // Don't browse in-place
+    }
+
     /* Try to get the flag from the verb */
     hr = StringCbPrintfW(wszKey, sizeof(wszKey), L"shell\\%s", pEntry->Verb.GetString());
     if (FAILED_UNEXPECTEDLY(hr))
         return 0;
-
-    cbVerb = sizeof(wFlags);
-    if (RegGetValueW(pEntry->hkClass, wszKey, FlagsName, RRF_RT_REG_DWORD, NULL, &wFlags, &cbVerb) == ERROR_SUCCESS)
-    {
-        return wFlags;
-    }
-
-    return 0;
+    return RegGetDword(pEntry->hkClass, wszKey, FlagsName, 0);
 }
 
 HRESULT
@@ -1302,8 +1462,7 @@ CDefaultContextMenu::TryToBrowse(
 HRESULT
 CDefaultContextMenu::InvokePidl(LPCMINVOKECOMMANDINFOEX lpcmi, LPCITEMIDLIST pidl, PStaticShellEntry pEntry)
 {
-    BOOL unicode = lpcmi->cbSize >= FIELD_OFFSET(CMINVOKECOMMANDINFOEX, ptInvoke) &&
-                   (lpcmi->fMask & CMIC_MASK_UNICODE);
+    const BOOL unicode = IsUnicode(*lpcmi);
 
     LPITEMIDLIST pidlFull = ILCombine(m_pidlFolder, pidl);
     if (pidlFull == NULL)
@@ -1315,7 +1474,23 @@ CDefaultContextMenu::InvokePidl(LPCMINVOKECOMMANDINFOEX lpcmi, LPCITEMIDLIST pid
     BOOL bHasPath = SHGetPathFromIDListW(pidlFull, wszPath);
 
     WCHAR wszDir[MAX_PATH];
-    if (bHasPath)
+
+    SHELLEXECUTEINFOW sei = { sizeof(sei) };
+    sei.fMask = SEE_MASK_CLASSKEY | SEE_MASK_IDLIST | (CmicFlagsToSeeFlags(lpcmi->fMask) & ~SEE_MASK_INVOKEIDLIST);
+    sei.hwnd = lpcmi->hwnd;
+    sei.nShow = lpcmi->nShow;
+    sei.lpVerb = pEntry->Verb;
+    sei.lpIDList = pidlFull;
+    sei.hkeyClass = pEntry->hkClass;
+    sei.dwHotKey = lpcmi->dwHotKey;
+    sei.hIcon = lpcmi->hIcon;
+    sei.lpDirectory = wszDir;
+
+    if (unicode && !StrIsNullOrEmpty(lpcmi->lpDirectoryW))
+    {
+        sei.lpDirectory = lpcmi->lpDirectoryW;
+    }
+    else if (bHasPath)
     {
         wcscpy(wszDir, wszPath);
         PathRemoveFileSpec(wszDir);
@@ -1326,28 +1501,21 @@ CDefaultContextMenu::InvokePidl(LPCMINVOKECOMMANDINFOEX lpcmi, LPCITEMIDLIST pid
             *wszDir = UNICODE_NULL;
     }
 
-    CComHeapPtr<WCHAR> pszParamsW;
-    SHELLEXECUTEINFOW sei = { sizeof(sei) };
-    sei.hwnd = lpcmi->hwnd;
-    sei.nShow = SW_SHOWNORMAL;
-    sei.lpVerb = pEntry->Verb;
-    sei.lpDirectory = wszDir;
-    sei.lpIDList = pidlFull;
-    sei.hkeyClass = pEntry->hkClass;
-    sei.fMask = SEE_MASK_CLASSKEY | SEE_MASK_IDLIST;
     if (bHasPath)
         sei.lpFile = wszPath;
 
+    CComHeapPtr<WCHAR> pszParamsW;
     if (unicode && !StrIsNullOrEmpty(lpcmi->lpParametersW))
         sei.lpParameters = lpcmi->lpParametersW;
     else if (!StrIsNullOrEmpty(lpcmi->lpParameters) && __SHCloneStrAtoW(&pszParamsW, lpcmi->lpParameters))
         sei.lpParameters = pszParamsW;
 
-    ShellExecuteExW(&sei);
+    if (!sei.lpClass && (lpcmi->fMask & (CMIC_MASK_HASLINKNAME | CMIC_MASK_HASTITLE)) && unicode)
+        sei.lpClass = lpcmi->lpTitleW; // Forward .lnk path from CShellLink::DoOpen (for consrv STARTF_TITLEISLINKNAME)
 
+    HRESULT hr = ShellExecuteExW(&sei) ? S_OK : HResultFromWin32(GetLastError());
     ILFree(pidlFull);
-
-    return S_OK;
+    return hr;
 }
 
 HRESULT
@@ -1402,12 +1570,11 @@ CDefaultContextMenu::InvokeRegVerb(
             hr = CoCreateInstance(clsid, NULL, CLSCTX_ALL, IID_PPV_ARG(IDropTarget, &pDT));
         if (SUCCEEDED(hr))
         {
+            CScopedSetObjectWithSite site(pDT, static_cast<IContextMenu*>(this));
             CComPtr<IPropertyBag> pPB;
             SHCreatePropertyBagOnRegKey(VerbKey, NULL, STGM_READ, IID_PPV_ARG(IPropertyBag, &pPB));
-            IUnknown_SetSite(pDT, static_cast<IContextMenu*>(this));
             IUnknown_InitializeCommand(pDT, pEntry->Verb.GetString(), pPB);
             hr = SHSimulateDrop(pDT, m_pDataObj, KeyState, pPtl, NULL);
-            IUnknown_SetSite(pDT, NULL);
             return hr;
         }
     }
@@ -1443,6 +1610,29 @@ CDefaultContextMenu::InvokeRegVerb(
 }
 
 HRESULT
+CDefaultContextMenu::_DoInvokeCommandCallback(
+    LPCMINVOKECOMMANDINFOEX lpcmi, WPARAM CmdId)
+{
+    BOOL Unicode = IsUnicode(*lpcmi);
+    WCHAR lParamBuf[MAX_PATH];
+    LPARAM lParam = 0;
+
+    if (Unicode && lpcmi->lpParametersW)
+        lParam = (LPARAM)lpcmi->lpParametersW;
+    else if (lpcmi->lpParameters)
+        lParam = SHAnsiToUnicode(lpcmi->lpParameters, lParamBuf, _countof(lParamBuf)) ? (LPARAM)lParamBuf : 0;
+
+    HRESULT hr;
+#if 0 // TODO: Try DFM_INVOKECOMMANDEX first.
+    DFMICS dfmics = { sizeof(DFMICS), lpcmi->fMask, lParam, m_iIdSCMFirst?, m_iIdDfltLast?, (LPCMINVOKECOMMANDINFO)lpcmi, m_site };
+    hr = _DoCallback(DFM_INVOKECOMMANDEX, CmdId, &dfmics);
+    if (hr == E_NOTIMPL)
+#endif
+        hr = _DoCallback(DFM_INVOKECOMMAND, CmdId, (void*)lParam);
+    return hr;
+}
+
+HRESULT
 WINAPI
 CDefaultContextMenu::InvokeCommand(
     LPCMINVOKECOMMANDINFO lpcmi)
@@ -1461,8 +1651,9 @@ CDefaultContextMenu::InvokeCommand(
         /* Get the ID which corresponds to this verb, and update our local copy */
         if (MapVerbToCmdId((LPVOID)LocalInvokeInfo.lpVerb, &CmdId, FALSE))
             LocalInvokeInfo.lpVerb = MAKEINTRESOURCEA(CmdId);
+        else
+            return E_INVALIDARG;
     }
-
     CmdId = LOWORD(LocalInvokeInfo.lpVerb);
 
     if (!m_DynamicEntries.IsEmpty() && CmdId >= m_iIdSHEFirst && CmdId < m_iIdSHELast)
@@ -1482,7 +1673,7 @@ CDefaultContextMenu::InvokeCommand(
 
     if (m_iIdCBFirst != m_iIdCBLast && CmdId >= m_iIdCBFirst && CmdId < m_iIdCBLast)
     {
-        Result = _DoCallback(DFM_INVOKECOMMAND, CmdId - m_iIdCBFirst, NULL);
+        Result = _DoInvokeCommandCallback(&LocalInvokeInfo, CmdId - m_iIdCBFirst);
         return Result;
     }
 
@@ -1652,8 +1843,7 @@ CDefaultContextMenu::HandleMenuMsg(
     WPARAM wParam,
     LPARAM lParam)
 {
-    /* FIXME: Should we implement this as well? */
-    return S_OK;
+    return HandleMenuMsg2(uMsg, wParam, lParam, NULL);
 }
 
 HRESULT SHGetMenuIdFromMenuMsg(UINT uMsg, LPARAM lParam, UINT *CmdId)
@@ -1670,25 +1860,6 @@ HRESULT SHGetMenuIdFromMenuMsg(UINT uMsg, LPARAM lParam, UINT *CmdId)
         *CmdId = pMeasureStruct->itemID;
         return S_OK;
     }
-
-    return E_FAIL;
-}
-
-HRESULT SHSetMenuIdInMenuMsg(UINT uMsg, LPARAM lParam, UINT CmdId)
-{
-    if (uMsg == WM_DRAWITEM)
-    {
-        DRAWITEMSTRUCT* pDrawStruct = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
-        pDrawStruct->itemID = CmdId;
-        return S_OK;
-    }
-    else if (uMsg == WM_MEASUREITEM)
-    {
-        MEASUREITEMSTRUCT* pMeasureStruct = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
-        pMeasureStruct->itemID = CmdId;
-        return S_OK;
-    }
-
     return E_FAIL;
 }
 
@@ -1700,34 +1871,31 @@ CDefaultContextMenu::HandleMenuMsg2(
     LPARAM lParam,
     LRESULT *plResult)
 {
-    if (uMsg == WM_INITMENUPOPUP)
-    {
-        POSITION it = m_DynamicEntries.GetHeadPosition();
-        while (it != NULL)
-        {
-            DynamicShellEntry& info = m_DynamicEntries.GetNext(it);
-            SHForwardContextMenuMsg(info.pCM, uMsg, wParam, lParam, plResult, TRUE);
-        }
-        return S_OK;
-    }
+    if (!SHELL_IsContextMenuMsg(uMsg))
+        return E_FAIL;
 
     UINT CmdId;
-    HRESULT hr = SHGetMenuIdFromMenuMsg(uMsg, lParam, &CmdId);
-    if (FAILED(hr))
-        return S_FALSE;
-
-    if (CmdId < m_iIdSHEFirst || CmdId >= m_iIdSHELast)
-        return S_FALSE;
-
-    CmdId -= m_iIdSHEFirst;
-    PDynamicShellEntry pEntry = GetDynamicEntry(CmdId);
-    if (pEntry)
+    if (uMsg == WM_INITMENUPOPUP)
     {
-        SHSetMenuIdInMenuMsg(uMsg, lParam, CmdId - pEntry->iIdCmdFirst);
-        SHForwardContextMenuMsg(pEntry->pCM, uMsg, wParam, lParam, plResult, TRUE);
+        CmdId = GetMenuItemID((HMENU)wParam, 0);
+        if (CmdId == ~0ul)
+            return E_FAIL;
     }
+    else
+    {
+        HRESULT hr = SHGetMenuIdFromMenuMsg(uMsg, lParam, &CmdId);
+        if (FAILED(hr))
+            return S_FALSE;
+    }
+    CmdId -= m_iIdQCMFirst; // Convert from Win32 id to our base
 
-   return S_OK;
+    if (CmdId >= m_iIdSHEFirst && CmdId < m_iIdSHELast)
+    {
+        if (PDynamicShellEntry pEntry = GetDynamicEntry(CmdId - m_iIdSHEFirst))
+            return SHForwardContextMenuMsg(pEntry->pCM, uMsg, wParam, lParam, plResult, TRUE);
+    }
+    // TODO: _DoCallback(DFM_WM_*, ...)
+    return E_FAIL;
 }
 
 HRESULT

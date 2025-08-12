@@ -46,31 +46,13 @@ BEGIN
     END
 END
 
-IDR_APPLICATIONMENU MENU
-BEGIN
-    POPUP ""
-    BEGIN
-        MENUITEM "&Встановити\tCtrl+Enter", ID_INSTALL
-        MENUITEM "В&идалити\tCtrl+Del", ID_UNINSTALL
-        MENUITEM "&Змінити", ID_MODIFY
-        MENUITEM SEPARATOR
-        MENUITEM "Вида&лити з реєстру", ID_REGREMOVE
-        MENUITEM SEPARATOR
-        MENUITEM "&Оновити\tF5", ID_REFRESH
-        MENUITEM SEPARATOR
-        MENUITEM "Оновити список &програм\tCtrl+F5", ID_RESETDB
-    END
-END
-
 IDD_SETTINGS_DIALOG DIALOGEX 0, 0, 250, 265
 STYLE DS_SHELLFONT | DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Налаштування"
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX "Загальні", -1, 4, 2, 240, 61
-    AUTOCHECKBOX "&Зберігати положення вікна", IDC_SAVE_WINDOW_POS, 15, 12, 219, 12
-    AUTOCHECKBOX "&Оновлювати список наявних програм при запуску", IDC_UPDATE_AVLIST, 15, 29, 222, 12
-    AUTOCHECKBOX "&Вести звіт встановлення/видалення програм", IDC_LOG_ENABLED, 15, 46, 219, 12
+    CONTROL "", IDC_GENERALLIST, "SysListView32", WS_TABSTOP | LVCHECKSTYLES, 15, 12, 219, 46, WS_EX_STATICEDGE
     GROUPBOX "Завантаження", -1, 4, 65, 240, 51
     LTEXT "Тека для завантажень:", -1, 16, 75, 100, 9
     EDITTEXT IDC_DOWNLOAD_DIR_EDIT, 15, 86, 166, 12, WS_CHILD | WS_VISIBLE | WS_GROUP | ES_AUTOHSCROLL
@@ -191,11 +173,20 @@ STRINGTABLE
 BEGIN
     IDS_APPTITLE "Менеджер додатків ReactOS"
     IDS_APP_AUTHORS "Copyright 2009 Dmitry Chapyshev"
-    IDS_SEARCH_TEXT "Пошук…"
-    IDS_APPS_COUNT "Kількість додатків: %d; Обрано: %d"
-    IDS_WELCOME_TITLE "Ласкаво просимо в Менеджер додатків ReactOS!\n\n"
+    IDS_WELCOME_TITLE "Ласкаво просимо в Менеджер додатків ReactOS!"
     IDS_WELCOME_TEXT "Виберіть категорію зліва, а потім виберіть програми для встановлення чи видалення.\nСторінка ReactOS: "
     IDS_WELCOME_URL "https://reactos.org"
+
+    IDS_APPWIZ_TITLE "Add/Remove Programs"
+    IDS_APPWIZ_TEXT1 "Choose ""Applications"" or ""Updates"" to view the list of applications or updates installed on your system."
+    IDS_APPWIZ_TEXT2 "To remove a program or to modify its installed components, select it from the list and click on ""Uninstall"" or ""Modify""."
+END
+
+STRINGTABLE
+BEGIN
+    IDS_SEARCH_TEXT "Пошук…"
+    IDS_APPS_COUNT "Kількість додатків: %d"
+    IDS_APPS_SELECT_COUNT "; Обрано: %d"
     IDS_INSTALLED "Встановлені"
     IDS_AVAILABLEFORINST "Доступні для встановлення"
     IDS_UPDATES "Оновлення"
@@ -222,6 +213,10 @@ BEGIN
     IDS_APP_DISPLAY_LIST "List"
     IDS_APP_DISPLAY_TILE "Tile"
     IDS_NO_SEARCH_RESULTS "No search results"
+    IDS_CFG_SAVE_WINDOW_POS "Зберігати положення вікна"
+    IDS_CFG_UPDATE_AVLIST "Оновлювати список наявних програм при запуску"
+    IDS_CFG_LOG_ENABLED "Вести звіт встановлення/видалення програм"
+    IDS_CFG_SMALL_ICONS "Дрібні значки"
 END
 
 STRINGTABLE
@@ -275,4 +270,5 @@ END
 STRINGTABLE
 BEGIN
     IDS_INSTGEN_CONFIRMUNINST "Are you sure you want to uninstall %s?"
+    IDS_INSTGEN_CONFIRMINSTRUNAPP "Installation complete, run %s now?"
 END

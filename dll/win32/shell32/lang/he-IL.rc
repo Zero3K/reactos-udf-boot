@@ -95,6 +95,14 @@ BEGIN
     END
 END
 
+IDM_DVSELECT MENU
+BEGIN
+    POPUP ""
+    BEGIN
+        MENUITEM "Se&lect", 0
+    END
+END
+
 IDD_BROWSE_FOR_FOLDER DIALOGEX 15, 40, 188, 192
 STYLE DS_SHELLFONT | DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "בחירת תיקיה"
@@ -603,17 +611,18 @@ BEGIN
     DEFPUSHBUTTON "&התחלה", IDOK, 53, 198, 60, 14
     PUSHBUTTON "&סגירה", IDCANCEL, 118, 198, 60, 14
     LTEXT "&קיבולת:", -1, 7, 6, 169, 9
-    COMBOBOX 28673, 7, 17, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28673, 7, 17, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT "&מערכת קבצים", -1, 7, 35, 170, 9
-    COMBOBOX 28677, 7, 46, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28677, 7, 46, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     CONTROL "", 28678, "MSCTLS_PROGRESS32", 0, 7, 181, 170, 8
     LTEXT "&גודל יחידת הקצאה", -1, 7, 64, 170, 9
-    COMBOBOX 28680, 7, 75, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28680, 7, 75, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT "&תווית כונן", -1, 7, 93, 170, 9
     EDITTEXT 28679, 7, 103, 170, 13, ES_AUTOHSCROLL
     GROUPBOX "אפשרויות אתחול", 4610, 7, 121, 170, 49
     AUTOCHECKBOX "&אתחול מהיר", 28674, 16, 135, 155, 10
     AUTOCHECKBOX "אפשר דחיסת קבצים", 28675, 16, 152, 155, 10
+    CONTROL "", 30000, "STATIC", SS_ICON | WS_TABSTOP | SS_CENTERIMAGE | SS_NOTIFY, 7, 198, 15, 14
 END
 
 IDD_CHECK_DISK DIALOGEX 50, 50, 194, 115
@@ -636,8 +645,8 @@ CAPTION "שינוי סמל"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     LTEXT "Look for icons in this file:", -1, 7, 7, 179, 10
-    PUSHBUTTON "עיון...", IDC_BUTTON_PATH, 135, 17, 50, 14
     EDITTEXT IDC_EDIT_PATH, 7, 17, 123, 14, ES_AUTOHSCROLL
+    PUSHBUTTON "עיון...", IDC_BUTTON_PATH, 135, 17, 50, 14
     LTEXT "Select an icon from the list below:", -1, 7, 36, 179, 10
     LISTBOX IDC_PICKICON_LIST, 7, 47, 181, 122, LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | LBS_MULTICOLUMN | LBS_DISABLENOSCROLL | WS_HSCROLL | WS_TABSTOP
     DEFPUSHBUTTON "אישור", IDOK, 81, 179, 50, 14
@@ -974,7 +983,10 @@ BEGIN
     IDS_PRINT_VERB "הדפס"
     IDS_CMD_VERB "פתח בשורת הפקודה"
 
+    IDS_MULTIPLETYPES   "Multiple Types"
+    IDS_VARIOUSFOLDERS  "Various Folders"
     IDS_FILE_FOLDER "%u קבצים, %u תיקיות"
+
     IDS_PRINTERS "מדפסות"
     IDS_FONTS "גופנים"
     IDS_INSTALLNEWFONT "התקנת גופן חדש..."
@@ -989,10 +1001,6 @@ BEGIN
     IDS_FILE_TYPES "סוגי קבצים"
     IDS_COLUMN_EXTENSION "סיומות"
 
-    /* As in 'INI File' or 'WAV File', fallback string for no-name extensions
-       used in the _File type_ tab of the _Folder Options_ dialog */
-    IDS_FILE_EXT_TYPE "קובץ %s"
-
     IDS_BYTES_FORMAT "בתים"
     IDS_UNKNOWN_APP "יישום לא ידוע"
     IDS_EXE_DESCRIPTION "תיאור:"
@@ -1000,6 +1008,13 @@ BEGIN
     IDS_MENU_EMPTY "(ריק)"
     IDS_OBJECTS "%d פריטים"
     IDS_OBJECTS_SELECTED "%d פריטים נבחרו"
+
+    IDS_SEARCH_BROWSEITEM "עיון..."
+
+
+    IDS_RECYCLE_CLEANER_DISPLAYNAME "Recycle Bin"
+    IDS_RECYCLE_CLEANER_DESCRIPTION "The Recycle Bin contains files you have deleted from your computer. These files are not permanently removed until you empty the Recycle Bin."
+    IDS_RECYCLE_CLEANER_BUTTON_TEXT "&View Files"
 
     IDS_TITLE_MYCOMP "המחשב שלי"
     IDS_TITLE_MYNET "מיקומי הרשת שלי"
@@ -1035,6 +1050,10 @@ BEGIN
     IDS_ADVANCED_DISPLAY_RUN "Display Run"
     IDS_ADVANCED_DISPLAY_ADMINTOOLS "Display Administrative Tools"
     IDS_ADVANCED_SMALL_START_MENU "Show Small Icons in Start menu"
+
+    IDS_VISEFFECT_DRAGFULL "Show window contents while dragging"
+    IDS_VISEFFECT_FONTSMOOTHING "Smooth edges of screen fonts"
+    IDS_VISEFFECT_LISTVIEWSHADOW "Use drop shadows for icon labels on the desktop"
 
     IDS_NEWEXT_ADVANCED_LEFT "<< &מתקדם"
     IDS_NEWEXT_ADVANCED_RIGHT "&מתקדם >>"

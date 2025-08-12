@@ -8,9 +8,16 @@ spec2def(kernel32_vista.dll kernel32_vista.spec ADD_IMPORTLIB)
 
 list(APPEND SOURCE
     firmware.c
+    EnumSystemLocalesEx.c
+    GetLocaleInfoEx.c
     GetFileInformationByHandleEx.c
+    GetFinalPathNameByHandle.c
     GetTickCount64.c
+    GetUserDefaultLocaleName.c
     InitOnce.c
+    IsValidLocaleName.c
+    LCIDToLocaleName.c
+    LocaleNameToLCID.c
     sync.c
     vista.c)
 
@@ -24,7 +31,11 @@ endif()
 add_library(kernel32_vista_static ${SOURCE})
 target_link_libraries(kernel32_vista_static ${PSEH_LIB})
 add_dependencies(kernel32_vista_static psdk)
-add_library(kernel32_vista MODULE DllMain.c ${CMAKE_CURRENT_BINARY_DIR}/kernel32_vista.def)
+
+add_library(kernel32_vista MODULE
+    DllMain.c
+    kernel32_vista.rc
+    ${CMAKE_CURRENT_BINARY_DIR}/kernel32_vista.def)
 set_module_type(kernel32_vista win32dll ENTRYPOINT DllMain 12)
 target_link_libraries(kernel32_vista kernel32_vista_static kernel32_shared)
 add_importlibs(kernel32_vista kernel32 ntdll_vista ntdll)

@@ -3,7 +3,6 @@ remove_definitions(-D_WIN32_WINNT=0x502)
 add_definitions(-D_WIN32_WINNT=0x600)
 
 add_definitions(
-    -D__WINESRC__
     -D_OLE32_
     -D__ROS_LONG64__
     -DCOM_NO_WINDOWS_H
@@ -11,7 +10,6 @@ add_definitions(
     -DPROXY_CLSID=CLSID_PSFactoryBuffer
     -DWINE_REGISTER_DLL)
 
-include_directories(BEFORE ${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
 spec2def(ole32.dll ole32.spec ADD_IMPORTLIB NO_PRIVATE_WARNINGS)
 generate_idl_iids(dcom.idl)
 add_idl_headers(ole32idl dcom.idl irot.idl)
@@ -88,9 +86,10 @@ if(MSVC)
 endif()
 
 set_module_type(ole32 win32dll)
-target_link_libraries(ole32 wine uuid ${PSEH_LIB})
+target_link_libraries(ole32 wine uuid ${PSEH_LIB} oldnames)
 add_delay_importlibs(ole32 oleaut32)
 add_importlibs(ole32 advapi32 user32 gdi32 rpcrt4 msvcrt kernel32 kernel32_vista ntdll)
 add_dependencies(ole32 ole32idl)
 add_pch(ole32 precomp.h "${PCH_SKIP_SOURCE}")
 add_cd_file(TARGET ole32 DESTINATION reactos/system32 FOR all)
+set_wine_module_FIXME(ole32) # CORE-5743: No ARRAY_SIZE and CONST_VTABLE

@@ -11,6 +11,40 @@
 #include <shlwapi.h>
 #include "sddl.h"
 
+EXTERN_C HRESULT WINAPI SHUpdateRecycleBinIcon(void);
+
+class CZZWStr
+{
+    LPWSTR m_sz;
+
+public:
+    ~CZZWStr() { SHFree(m_sz); }
+    CZZWStr() : m_sz(NULL) {}
+    CZZWStr(const CZZWStr&) = delete;
+    CZZWStr& operator=(const CZZWStr&) = delete;
+
+    bool Initialize(LPCWSTR Str)
+    {
+        SIZE_T cch = wcslen(Str) + 1;
+        m_sz = (LPWSTR)SHAlloc((cch + 1) * sizeof(*Str));
+        if (!m_sz)
+            return false;
+        CopyMemory(m_sz, Str, cch * sizeof(*Str));
+        m_sz[cch] = UNICODE_NULL; // Double-null terminate
+        return true;
+    }
+    inline LPWSTR c_str() { return m_sz; }
+};
+
+static int SHELL_SingleFileOperation(HWND hWnd, UINT Op, LPCWSTR pszFrom, LPCWSTR pszTo, FILEOP_FLAGS Flags)
+{
+    CZZWStr szzFrom, szzTo;
+    if (!szzFrom.Initialize(pszFrom) || !szzTo.Initialize(pszTo))
+        return ERROR_OUTOFMEMORY; // Note: Not one of the DE errors but also not in the DE range
+    SHFILEOPSTRUCTW fos = { hWnd, Op, szzFrom.c_str(), szzTo.c_str(), Flags };
+    return SHFileOperationW(&fos);
+}
+
 static BOOL
 IntDeleteRecursive(
     IN LPCWSTR FullName)
@@ -109,12 +143,22 @@ public:
     STDMETHODIMP DeleteFile(_In_ LPCWSTR szFileName) override;
     STDMETHODIMP EmptyRecycleBin() override;
     STDMETHODIMP EnumObjects(_Out_ IRecycleBinEnumList **ppEnumList) override;
+    STDMETHODIMP GetDirectory(LPWSTR szPath) override
+    {
+        if (!m_Folder[0])
+            return E_UNEXPECTED;
+        lstrcpynW(szPath, m_Folder, MAX_PATH);
+        return S_OK;
+    }
 
     /* IRecycleBin5 interface */
     STDMETHODIMP Delete(
         _In_ LPCWSTR pDeletedFileName,
         _In_ DELETED_FILE_RECORD *pDeletedFile) override;
     STDMETHODIMP Restore(
+        _In_ LPCWSTR pDeletedFileName,
+        _In_ DELETED_FILE_RECORD *pDeletedFile) override;
+    STDMETHODIMP RemoveFromDatabase(
         _In_ LPCWSTR pDeletedFileName,
         _In_ DELETED_FILE_RECORD *pDeletedFile) override;
     STDMETHODIMP OnClosing(_In_ IRecycleBinEnumList *prbel) override;
@@ -192,6 +236,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     SYSTEMTIME SystemTime;
     DWORD ClusterSize, BytesPerSector, SectorsPerCluster;
     HRESULT hr;
+    WIN32_FIND_DATAW wfd = {};
 
     TRACE("(%p, %s)\n", this, debugstr_w(szFileName));
 
@@ -206,7 +251,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
         {
             if (szFullName)
                 CoTaskMemFree(szFullName);
-            return HRESULT_FROM_WIN32(GetLastError());
+            return HResultFromWin32(GetLastError());
         }
         else if (len < dwBufferLength)
             break;
@@ -223,7 +268,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     if (dwAttributes == INVALID_FILE_ATTRIBUTES)
     {
         CoTaskMemFree(szFullName);
-        return HRESULT_FROM_WIN32(GetLastError());
+        return HResultFromWin32(GetLastError());
     }
 
     if (dwBufferLength < 2 || szFullName[1] != ':')
@@ -236,7 +281,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     hFile = CreateFileW(szFullName, 0, 0, NULL, OPEN_EXISTING, (dwAttributes & FILE_ATTRIBUTE_DIRECTORY) ? FILE_FLAG_BACKUP_SEMANTICS : 0, NULL);
     if (hFile == INVALID_HANDLE_VALUE)
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
 
@@ -247,7 +292,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     m_hInfoMapped = CreateFileMappingW(m_hInfo, NULL, PAGE_READWRITE | SEC_COMMIT, 0, 0, NULL);
     if (!m_hInfoMapped)
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
 
@@ -255,7 +300,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     pHeader = (PINFO2_HEADER)MapViewOfFile(m_hInfoMapped, FILE_MAP_WRITE, 0, 0, 0);
     if (!pHeader)
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
 
@@ -263,7 +308,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     FileSize.u.LowPart = GetFileSize(m_hInfo, &FileSize.u.HighPart);
     if (FileSize.u.LowPart < sizeof(INFO2_HEADER))
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
     dwEntries = (DWORD)((FileSize.QuadPart - sizeof(INFO2_HEADER)) / sizeof(DELETED_FILE_RECORD)) - 1;
@@ -273,14 +318,14 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
 #if 0
     if (!GetFileSizeEx(hFile, (PLARGE_INTEGER)&FileSize))
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
 #else
     FileSize.u.LowPart = GetFileSize(hFile, &FileSize.u.HighPart);
     if (FileSize.u.LowPart == INVALID_FILE_SIZE && GetLastError() != NO_ERROR)
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
 #endif
@@ -316,7 +361,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     /* Get cluster size */
     if (!GetDiskFreeSpaceW(m_VolumePath, &SectorsPerCluster, &BytesPerSector, NULL, NULL))
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
     ClusterSize = BytesPerSector * SectorsPerCluster;
@@ -325,7 +370,7 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
     GetSystemTime(&SystemTime);
     if (!SystemTimeToFileTime(&SystemTime, &pDeletedFile->DeletionTime))
     {
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
         goto cleanup;
     }
     pDeletedFile->dwPhysicalFileSize = ROUND_UP(FileSize.u.LowPart, ClusterSize);
@@ -339,11 +384,21 @@ STDMETHODIMP RecycleBin5::DeleteFile(_In_ LPCWSTR szFileName)
         goto cleanup;
     }
 
+    wfd.dwFileAttributes = dwAttributes;
+    wfd.nFileSizeLow = FileSize.u.LowPart;
+    GetFileTime(hFile, &wfd.ftCreationTime, &wfd.ftLastAccessTime, &wfd.ftLastWriteTime);
+
     /* Move file */
     if (MoveFileW(szFullName, DeletedFileName))
         hr = S_OK;
     else
-        hr = HRESULT_FROM_WIN32(GetLastError());
+        hr = HResultFromWin32(GetLastError());
+
+    if (SUCCEEDED(hr))
+    {
+        RECYCLEBINFILEIDENTITY ident = { pDeletedFile->DeletionTime, DeletedFileName };
+        CRecycleBin_NotifyRecycled(szFullName, &wfd, &ident);
+    }
 
 cleanup:
     if (pHeader)
@@ -402,62 +457,38 @@ STDMETHODIMP RecycleBin5::Delete(
     _In_ LPCWSTR pDeletedFileName,
     _In_ DELETED_FILE_RECORD *pDeletedFile)
 {
-    ULARGE_INTEGER FileSize;
-    PINFO2_HEADER pHeader;
-    DELETED_FILE_RECORD *pRecord, *pLast;
-    DWORD dwEntries, i;
 
     TRACE("(%p, %s, %p)\n", this, debugstr_w(pDeletedFileName), pDeletedFile);
 
-    if (m_EnumeratorCount != 0)
-        return HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION);
-
-    pHeader = (PINFO2_HEADER)MapViewOfFile(m_hInfoMapped, FILE_MAP_WRITE, 0, 0, 0);
-    if (!pHeader)
-        return HRESULT_FROM_WIN32(GetLastError());
-
-    FileSize.u.LowPart = GetFileSize(m_hInfo, &FileSize.u.HighPart);
-    if (FileSize.u.LowPart == 0)
-    {
-        UnmapViewOfFile(pHeader);
-        return HRESULT_FROM_WIN32(GetLastError());
-    }
-    dwEntries = (DWORD)((FileSize.QuadPart - sizeof(INFO2_HEADER)) / sizeof(DELETED_FILE_RECORD));
-
-    pRecord = (DELETED_FILE_RECORD *)(pHeader + 1);
-    for (i = 0; i < dwEntries; i++)
-    {
-        if (pRecord->dwRecordUniqueId == pDeletedFile->dwRecordUniqueId)
-        {
-            /* Delete file */
-            if (!IntDeleteRecursive(pDeletedFileName))
-            {
-                UnmapViewOfFile(pHeader);
-                return HRESULT_FROM_WIN32(GetLastError());
-            }
-
-            /* Clear last entry in the file */
-            MoveMemory(pRecord, pRecord + 1, (dwEntries - i - 1) * sizeof(DELETED_FILE_RECORD));
-            pLast = pRecord + (dwEntries - i - 1);
-            ZeroMemory(pLast, sizeof(DELETED_FILE_RECORD));
-            UnmapViewOfFile(pHeader);
-
-            /* Resize file */
-            CloseHandle(m_hInfoMapped);
-            SetFilePointer(m_hInfo, -(LONG)sizeof(DELETED_FILE_RECORD), NULL, FILE_END);
-            SetEndOfFile(m_hInfo);
-            m_hInfoMapped = CreateFileMappingW(m_hInfo, NULL, PAGE_READWRITE | SEC_COMMIT, 0, 0, NULL);
-            if (!m_hInfoMapped)
-                return HRESULT_FROM_WIN32(GetLastError());
-            return S_OK;
-        }
-        pRecord++;
-    }
-    UnmapViewOfFile(pHeader);
-    return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    int res = IntDeleteRecursive(pDeletedFileName);
+    if (!res)
+        return HResultFromWin32(GetLastError());
+    res = RemoveFromDatabase(pDeletedFileName, pDeletedFile);
+    if (res == 0)
+        SHUpdateRecycleBinIcon(); // Full --> Empty
+    return res;
 }
 
 STDMETHODIMP RecycleBin5::Restore(
+    _In_ LPCWSTR pDeletedFileName,
+    _In_ DELETED_FILE_RECORD *pDeletedFile)
+{
+
+    TRACE("(%p, %s, %p)\n", this, debugstr_w(pDeletedFileName), pDeletedFile);
+
+    int res = SHELL_SingleFileOperation(NULL, FO_MOVE, pDeletedFileName, pDeletedFile->FileNameW, 0);
+    if (res)
+    {
+        ERR("SHFileOperationW failed with 0x%x\n", res);
+        return E_FAIL;
+    }
+    res = RemoveFromDatabase(pDeletedFileName, pDeletedFile);
+    if (res == 0)
+        SHUpdateRecycleBinIcon(); // Full --> Empty
+    return res;
+}
+
+STDMETHODIMP RecycleBin5::RemoveFromDatabase(
     _In_ LPCWSTR pDeletedFileName,
     _In_ DELETED_FILE_RECORD *pDeletedFile)
 {
@@ -465,8 +496,6 @@ STDMETHODIMP RecycleBin5::Restore(
     PINFO2_HEADER pHeader;
     DELETED_FILE_RECORD *pRecord, *pLast;
     DWORD dwEntries, i;
-    SHFILEOPSTRUCTW op;
-    int res;
 
     TRACE("(%p, %s, %p)\n", this, debugstr_w(pDeletedFileName), pDeletedFile);
 
@@ -490,20 +519,6 @@ STDMETHODIMP RecycleBin5::Restore(
     {
         if (pRecord->dwRecordUniqueId == pDeletedFile->dwRecordUniqueId)
         {
-            /* Restore file */
-            ZeroMemory(&op, sizeof(op));
-            op.wFunc = FO_MOVE;
-            op.pFrom = pDeletedFileName;
-            op.pTo = pDeletedFile->FileNameW;
-
-            res = SHFileOperationW(&op);
-            if (res)
-            {
-                ERR("SHFileOperationW failed with 0x%x\n", res);
-                UnmapViewOfFile(pHeader);
-                return E_FAIL;
-            }
-
             /* Clear last entry in the file */
             MoveMemory(pRecord, pRecord + 1, (dwEntries - i - 1) * sizeof(DELETED_FILE_RECORD));
             pLast = pRecord + (dwEntries - i - 1);
@@ -516,8 +531,9 @@ STDMETHODIMP RecycleBin5::Restore(
             SetEndOfFile(m_hInfo);
             m_hInfoMapped = CreateFileMappingW(m_hInfo, NULL, PAGE_READWRITE | SEC_COMMIT, 0, 0, NULL);
             if (!m_hInfoMapped)
-                return HRESULT_FROM_WIN32(GetLastError());
-            return S_OK;
+                return HResultFromWin32(GetLastError());
+            dwEntries--;
+            return FAILED((int)dwEntries) ? INT_MAX : dwEntries;
         }
         pRecord++;
     }
@@ -543,7 +559,8 @@ RecycleBin5_Create(
     LPWSTR FileName; /* Pointer into BufferName buffer */
     LPCSTR DesktopIniContents = "[.ShellClassInfo]\r\nCLSID={645FF040-5081-101B-9F08-00AA002F954E}\r\n";
     INFO2_HEADER Info2Contents[] = { { 5, 0, 0, 0x320, 0 } };
-    DWORD BytesToWrite, BytesWritten, Needed;
+    DWORD BytesToWrite, BytesWritten;
+    SIZE_T Needed;
     HANDLE hFile = INVALID_HANDLE_VALUE;
     HRESULT hr;
 
@@ -607,7 +624,7 @@ RecycleBin5_Create(
         hr = HRESULT_FROM_WIN32(GetLastError());
         goto cleanup;
     }
-    BytesToWrite = strlen(DesktopIniContents);
+    BytesToWrite = (UINT)strlen(DesktopIniContents);
     if (!WriteFile(hFile, DesktopIniContents, (DWORD)BytesToWrite, &BytesWritten, NULL))
     {
         hr = HRESULT_FROM_WIN32(GetLastError());

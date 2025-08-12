@@ -33,6 +33,15 @@ WINE_DEFAULT_DEBUG_CHANNEL(desktop);
 static const WCHAR szProgmanClassName[]  = L"Progman";
 static const WCHAR szProgmanWindowName[] = L"Program Manager";
 
+static BOOL IsDesktopBrowserForwardShellViewCmd(WORD Cmd)
+{
+    // Note: The normal CShellBrowser forwards the entire FCIDM_SHVIEWFIRST..LAST range, we do not.
+    // Note: Windows allows FCIDM_SHVIEW_SHOWINGROUPS but we don't support it nor does it make sense.
+    return (FCIDM_SHVIEW_CREATELINK <= Cmd && Cmd <= FCIDM_SHVIEW_DESELECTALL) || 
+           (FCIDM_SHVIEW_ARRANGE_AUTO <= Cmd && Cmd <= FCIDM_SHVIEW_ARRANGE_AUTOGRID) ||
+           (Cmd == FCIDM_SHVIEW_REFRESH);
+}
+
 class CDesktopBrowser :
     public CWindowImpl<CDesktopBrowser, CWindow, CFrameWinTraits>,
     public CComObjectRootEx<CComMultiThreadModelNoCS>,
@@ -226,8 +235,7 @@ HRESULT CDesktopBrowser::Initialize(IShellDesktopTray *ShellDesk)
     if (!m_hWnd)
         return E_FAIL;
 
-    CSFV csfv = {sizeof(CSFV), psfDesktop};
-    hRet = SHCreateShellFolderViewEx(&csfv, &m_ShellView);
+    hRet = psfDesktop->CreateViewObject(m_hWnd, IID_PPV_ARG(IShellView, &m_ShellView));
     if (FAILED_UNEXPECTEDLY(hRet))
         return hRet;
 
@@ -400,8 +408,11 @@ LRESULT CDesktopBrowser::OnCommand(UINT uMsg, WPARAM wParam, LPARAM lParam, BOOL
             if (m_ShellView)
                 m_ShellView->Refresh();
             break;
+        default:
+            if (IsDesktopBrowserForwardShellViewCmd(LOWORD(wParam)) && m_hWndShellView)
+                return SendMessageW(m_hWndShellView, uMsg, wParam, lParam);
+            break;
     }
-
     return 0;
 }
 
@@ -432,6 +443,7 @@ LRESULT CDesktopBrowser::OnSettingChange(UINT uMsg, WPARAM wParam, LPARAM lParam
         LPVOID lpEnvironment;
         RegenerateUserEnvironment(&lpEnvironment, TRUE);
     }
+    SHSettingsChanged((LPCVOID)wParam, (PCWSTR)lParam); // Invalidate cached restrictions
 
     if (m_hWndShellView)
     {

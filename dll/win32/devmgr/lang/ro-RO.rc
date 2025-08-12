@@ -282,7 +282,7 @@ BEGIN
     BEGIN
         MENUITEM "Dispozitive după tip",        IDM_DEVBYTYPE
         MENUITEM "Dispozitive după conexiune",  IDM_DEVBYCONN
-        MENUITEM "Resurse după tip",            IDM_RESBYTYPE, GRAYED
+        MENUITEM "Resurse după tip",            IDM_RESBYTYPE
         MENUITEM "Resurse după conexiune",      IDM_RESBYCONN, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Dispozitive ascunse",         IDM_SHOWHIDDEN
@@ -294,14 +294,15 @@ BEGIN
 END
 
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_APPNAME               "Manager de dispozitive"
   IDS_APP_AUTHORS           "Copyright 2015 Ged Murphy"
   IDS_CONFIRM_DISABLE       "Dezactivarea acestui dispozitiv va cauza oprirea funcționării sale.\nSigur doriți dezactivarea sa?"
   IDS_CONFIRM_UNINSTALL     "Avertisment: Urmează să dezinstalați acest dispozitiv din sistem.\nContinuați?"
 END
-STRINGTABLE DISCARDABLE
+
+STRINGTABLE
 BEGIN
   IDS_MENU_UPDATE           "Actualizare driver…"
   IDS_MENU_ENABLE           "Activare"
@@ -312,7 +313,7 @@ BEGIN
   IDS_MENU_PROPERTIES       "Proprietăți"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_TOOLTIP_PROPERTIES    "Proprietăți"
   IDS_TOOLTIP_SCAN          "Scanare configurație hardware"
@@ -322,8 +323,16 @@ BEGIN
   IDS_TOOLTIP_UNINSTALL     "Dezinstalează"
 END
 
+STRINGTABLE
+BEGIN
+  IDS_TYPE_MEMORY           "Memory"
+  IDS_TYPE_PORT             "Input/output (IO)"
+  IDS_TYPE_DMA              "Direct Memory Access (DMA)"
+  IDS_TYPE_IRQ              "Interrupt request (IRQ)"
+END
+
 /* Hints */
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_HINT_BLANK        " "
   IDS_HINT_PROPERTIES   " Inspectarea proprietăților pentru selecția curentă."

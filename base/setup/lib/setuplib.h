@@ -7,6 +7,16 @@
 
 #pragma once
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef _SETUPLIB_
+#define SPLIBAPI DECLSPEC_IMPORT
+#else
+#define SPLIBAPI
+#endif
+
 /* INCLUDES *****************************************************************/
 
 /* Needed PSDK headers when using this library */
@@ -21,8 +31,6 @@
 #endif
 
 /* NOTE: Please keep the header inclusion order! */
-
-extern HANDLE ProcessHeap;
 
 #include "errorcode.h"
 #include "spapisup/fileqsup.h"
@@ -40,6 +48,17 @@ extern HANDLE ProcessHeap;
 #include "utils/arcname.h"
 #include "utils/osdetect.h"
 #include "utils/regutil.h"
+
+typedef enum _ARCHITECTURE_TYPE
+{
+    ARCH_PcAT,      //< Standard BIOS-based PC-AT
+    ARCH_NEC98x86,  //< NEC PC-98
+    ARCH_Xbox,      //< Original Xbox
+    ARCH_Arc,       //< ARC-based (MIPS, SGI)
+    ARCH_Efi,       //< EFI and UEFI
+// Place other architectures supported by the Setup below.
+} ARCHITECTURE_TYPE;
+
 #include "bootcode.h"
 #include "fsutil.h"
 #include "bootsup.h"
@@ -91,11 +110,11 @@ typedef struct _USETUP_DATA
      *
      * For more information, see:
      * https://en.wikipedia.org/wiki/System_partition_and_boot_partition
-     * http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/boot-and-system-volumes.html
-     * http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/arc-boot-process.html
-     * http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/efi-boot-process.html
-     * http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/determining-system-volume.html
-     * http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/determining-boot-volume.html
+     * https://web.archive.org/web/20160604095323/http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/boot-and-system-volumes.html
+     * https://web.archive.org/web/20160604095238/http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/arc-boot-process.html
+     * https://web.archive.org/web/20160508052211/http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/efi-boot-process.html
+     * https://web.archive.org/web/20160604093304/http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/determining-system-volume.html
+     * https://web.archive.org/web/20160604095540/http://homepage.ntlworld.com/jonathan.deboynepollard/FGA/determining-boot-volume.html
      */
     UNICODE_STRING SystemRootPath;
 
@@ -110,7 +129,7 @@ typedef struct _USETUP_DATA
     LONG DestinationDiskNumber;
     LONG DestinationPartitionNumber;
 
-    LONG MBRInstallType;
+    LONG BootLoaderLocation;
     LONG FormatPartition;
     LONG AutoPartition;
     LONG FsType;
@@ -123,6 +142,7 @@ typedef struct _USETUP_DATA
     PGENERIC_LIST LanguageList;
 
 /* Settings *****/
+    ARCHITECTURE_TYPE ArchType; //< Target architecture (MachineType)
     PCWSTR ComputerType;
     PCWSTR DisplayType;
     // PCWSTR KeyboardDriver;
@@ -141,27 +161,25 @@ typedef struct _USETUP_DATA
 #include "install.h"
 
 
-// HACK!!
-extern BOOLEAN IsUnattendedSetup;
-
-
 /* FUNCTIONS ****************************************************************/
 
 #include "substset.h"
 
-VOID
+BOOLEAN
+NTAPI
 CheckUnattendedSetup(
     IN OUT PUSETUP_DATA pSetupData);
 
 VOID
+NTAPI
 InstallSetupInfFile(
     IN OUT PUSETUP_DATA pSetupData);
 
 NTSTATUS
 GetSourcePaths(
-    OUT PUNICODE_STRING SourcePath,
-    OUT PUNICODE_STRING SourceRootPath,
-    OUT PUNICODE_STRING SourceRootDir);
+    _Out_ PUNICODE_STRING SourcePath,
+    _Out_ PUNICODE_STRING SourceRootPath,
+    _Out_ PUNICODE_STRING SourceRootDir);
 
 ERROR_NUMBER
 LoadSetupInf(
@@ -170,6 +188,7 @@ LoadSetupInf(
 #define ERROR_SYSTEM_PARTITION_NOT_FOUND    (ERROR_LAST_ERROR_CODE + 1)
 
 BOOLEAN
+NTAPI
 InitSystemPartition(
     /**/_In_ PPARTLIST PartitionList,       /* HACK HACK! */
     /**/_In_ PPARTENTRY InstallPartition,   /* HACK HACK! */
@@ -177,26 +196,39 @@ InitSystemPartition(
     _In_opt_ PFSVOL_CALLBACK FsVolCallback,
     _In_opt_ PVOID Context);
 
+/**
+ * @brief
+ * Defines the class of characters valid for the installation directory.
+ *
+ * The valid characters are: ASCII alphanumericals (a-z, A-Z, 0-9),
+ * and: '.', '\\', '-', '_' . Spaces are not allowed.
+ **/
 #define IS_VALID_INSTALL_PATH_CHAR(c) \
-    (iswalnum(c) || (c) == L'.' || (c) == L'\\' || (c) == L'-' || (c) == L'_')
+    (isalnum(c) || (c) == L'.' || (c) == L'\\' || (c) == L'-' || (c) == L'_')
 
 BOOLEAN
+NTAPI
 IsValidInstallDirectory(
     _In_ PCWSTR InstallDir);
 
 NTSTATUS
+NTAPI
 InitDestinationPaths(
-    IN OUT PUSETUP_DATA pSetupData,
-    IN PCWSTR InstallationDir,
-    IN PPARTENTRY PartEntry);   // FIXME: HACK!
+    _Inout_ PUSETUP_DATA pSetupData,
+    _In_ PCWSTR InstallationDir,
+    _In_ PVOLENTRY Volume);
 
 // NTSTATUS
 ERROR_NUMBER
+NTAPI
 InitializeSetup(
-    IN OUT PUSETUP_DATA pSetupData,
-    IN ULONG InitPhase);
+    _Inout_ PUSETUP_DATA pSetupData,
+    _In_opt_ PSETUP_ERROR_ROUTINE ErrorRoutine,
+    _In_ PSPFILE_EXPORTS pSpFileExports,
+    _In_ PSPINF_EXPORTS pSpInfExports);
 
 VOID
+NTAPI
 FinishSetup(
     IN OUT PUSETUP_DATA pSetupData);
 
@@ -217,6 +249,7 @@ typedef VOID
 (__cdecl *PREGISTRY_STATUS_ROUTINE)(IN REGISTRY_STATUS, ...);
 
 ERROR_NUMBER
+NTAPI
 UpdateRegistry(
     IN OUT PUSETUP_DATA pSetupData,
     /**/IN BOOLEAN RepairUpdateFlag,     /* HACK HACK! */
@@ -225,5 +258,9 @@ UpdateRegistry(
     /**/IN PCWSTR SelectedLanguageId,    /* HACK HACK! */
     IN PREGISTRY_STATUS_ROUTINE StatusRoutine OPTIONAL,
     IN PFONTSUBSTSETTINGS SubstSettings OPTIONAL);
+
+#ifdef __cplusplus
+}
+#endif
 
 /* EOF */

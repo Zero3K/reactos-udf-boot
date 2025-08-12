@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <strsafe.h>
 #include <versionhelpers.h>
+#include <shellutils.h>
 #include "shell32_apitest_sub.h"
 
 static WCHAR s_win_dir[MAX_PATH];
@@ -148,7 +149,7 @@ getCommandLineFromProcess(HANDLE hProcess)
     return pszBuffer; // needs free()
 }
 
-static void TEST_DoTestEntryStruct(const TEST_ENTRY *pEntry)
+static TEST_RESULT TEST_DoTestEntryStruct(const TEST_ENTRY *pEntry)
 {
     SHELLEXECUTEINFOW info = { sizeof(info) };
     info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_WAITFORINPUTIDLE |
@@ -171,6 +172,9 @@ static void TEST_DoTestEntryStruct(const TEST_ENTRY *pEntry)
     ok(pEntry->result == result,
        "Line %d: result: %d vs %d\n", pEntry->line, pEntry->result, result);
 
+    if (result == TEST_SUCCESS_WITH_PROCESS)
+        WaitForInputIdle(info.hProcess, 2000);
+
     if (pEntry->result == TEST_SUCCESS_WITH_PROCESS && pEntry->cmdline && !s_bWow64)
     {
         LPWSTR cmdline = getCommandLineFromProcess(info.hProcess);
@@ -190,13 +194,28 @@ static void TEST_DoTestEntryStruct(const TEST_ENTRY *pEntry)
     }
 
     CloseHandle(info.hProcess);
+    return result;
 }
 
 static void
 TEST_DoTestEntry(INT line, TEST_RESULT result, LPCWSTR lpFile, LPCWSTR cmdline)
 {
+    WINDOW_LIST existingwindows;
+    GetWindowList(&existingwindows);
+    HWND hWndForeground = GetForegroundWindow();
+
     TEST_ENTRY entry = { line, result, lpFile, cmdline };
-    TEST_DoTestEntryStruct(&entry);
+    result = TEST_DoTestEntryStruct(&entry);
+
+    if (result == TEST_SUCCESS_NO_PROCESS)
+    {
+        // Wait a bit for Explorer to open its window
+        for (UINT i = 0; i < 2000 && hWndForeground == GetForegroundWindow(); i += 250)
+            Sleep(250);
+    }
+
+    CloseNewWindows(&existingwindows);
+    FreeWindowList(&existingwindows);
 }
 
 static BOOL
@@ -313,18 +332,30 @@ static BOOL TEST_Start(void)
 
 static void TEST_End(void)
 {
-    Sleep(500);
-    GetWindowList(&s_List2);
-    CloseNewWindows(&s_List1, &s_List2);
-    FreeWindowList(&s_List1);
-    FreeWindowList(&s_List2);
-
     DeleteFileW(s_win_test_exe);
     DeleteFileW(s_sys_test_exe);
     DeleteFileW(s_win_txt_file);
     DeleteFileW(s_sys_txt_file);
     DeleteFileW(s_win_bat_file);
     DeleteFileW(s_sys_bat_file);
+
+    // Execution can be asynchronous; you have to wait for it to finish.
+    INT nCount = GetWindowCount();
+    for (INT i = 0; i < 100; ++i)
+    {
+        INT nOldCount = nCount;
+        Sleep(3000);
+        nCount = GetWindowCount();
+        if (nOldCount == nCount)
+            break;
+    }
+    Sleep(3000);
+
+    // Close newly-opened window(s)
+    GetWindowList(&s_List2);
+    CloseNewWindows(&s_List1, &s_List2);
+    FreeWindowList(&s_List1);
+    FreeWindowList(&s_List2);
 }
 
 static void test_properties()
@@ -368,26 +399,40 @@ static void test_properties()
 
 static void test_sei_lpIDList()
 {
-    if (IsWindowsVistaOrGreater())
+    // Note: SEE_MASK_FLAG_NO_UI prevents the test from blocking with a MessageBox
+    WCHAR path[MAX_PATH];
+
+    /* This tests ShellExecuteEx with lpIDList for explorer C:\ */
+    GetSystemDirectoryW(path, _countof(path));
+    PathStripToRootW(path);
+    LPITEMIDLIST pidl = ILCreateFromPathW(path);
+    if (!pidl)
     {
-        skip("Vista+\n");
+        skip("Unable to initialize test\n");
         return;
     }
 
-    /* This tests ShellExecuteEx with lpIDList for explorer C:\ */
-
-    /* ITEMIDLIST for CLSID of 'My Computer' followed by PIDL for 'C:\' */
-    BYTE lpitemidlist[30] = { 0x14, 0, 0x1f, 0, 0xe0, 0x4f, 0xd0, 0x20, 0xea,
-    0x3a, 0x69, 0x10, 0xa2, 0xd8, 0x08, 0, 0x2b, 0x30, 0x30, 0x9d, // My Computer
-    0x8, 0, 0x23, 0x43, 0x3a, 0x5c, 0x5c, 0, 0, 0,}; // C:\\ + NUL-NUL ending
-
     SHELLEXECUTEINFOW ShellExecInfo = { sizeof(ShellExecInfo) };
-    ShellExecInfo.fMask = SEE_MASK_IDLIST;
-    ShellExecInfo.hwnd = NULL;
     ShellExecInfo.nShow = SW_SHOWNORMAL;
-    ShellExecInfo.lpIDList = lpitemidlist;
+    ShellExecInfo.fMask = SEE_MASK_IDLIST | SEE_MASK_FLAG_NO_UI | SEE_MASK_FLAG_DDEWAIT;
+    ShellExecInfo.lpIDList = pidl;
     BOOL ret = ShellExecuteExW(&ShellExecInfo);
     ok_int(ret, TRUE);
+    ILFree(pidl);
+
+    /* This tests ShellExecuteEx with lpIDList going through IContextMenu */
+    CCoInit ComInit;
+    pidl = SHCloneSpecialIDList(NULL, CSIDL_PROFILE, TRUE);
+    if (!pidl)
+    {
+        skip("Unable to initialize test\n");
+        return;
+    }
+    ShellExecInfo.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_FLAG_NO_UI | SEE_MASK_FLAG_DDEWAIT;
+    ShellExecInfo.lpIDList = pidl;
+    ret = ShellExecuteExW(&ShellExecInfo);
+    ok_int(ret, TRUE);
+    ILFree(pidl);
 }
 
 static BOOL

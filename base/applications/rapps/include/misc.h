@@ -16,6 +16,12 @@
 #define CurrentArchitecture L"ppc"
 #endif
 
+static inline HRESULT
+HResultFromWin32(UINT Error)
+{
+    return HRESULT_FROM_WIN32(Error);
+}
+
 static inline UINT
 ErrorFromHResult(HRESULT hr)
 {
@@ -26,10 +32,19 @@ ErrorFromHResult(HRESULT hr)
         return hr >= 0 ? ERROR_SUCCESS : hr;
 }
 
+UINT
+ErrorBox(HWND hOwner, UINT Error = GetLastError());
+
 VOID
 CopyTextToClipboard(LPCWSTR lpszText);
 VOID
-ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem);
+ShowPopupMenuEx(HWND hwnd, HWND hwndOwner, UINT MenuID, UINT DefaultItem, POINT *Point = NULL);
+VOID
+EmulateDialogReposition(HWND hwnd);
+UINT
+ClassifyFile(PCWSTR Path);
+BOOL
+OpensWithExplorer(PCWSTR Path);
 BOOL
 StartProcess(const CStringW &Path, BOOL Wait);
 BOOL
@@ -114,4 +129,33 @@ GetProgramFilesPath(CStringW &Path, BOOL PerUser, HWND hwnd = NULL);
 
 template <class T> class CLocalPtr : public CHeapPtr<T, CLocalAllocator>
 {
+};
+
+struct CScopedMutex
+{
+    HANDLE m_hMutex;
+
+    CScopedMutex(LPCWSTR Name, UINT Timeout = INFINITE, BOOL InitialOwner = FALSE)
+    {
+        m_hMutex = CreateMutexW(NULL, InitialOwner, Name);
+        if (m_hMutex && !InitialOwner)
+        {
+            DWORD wait = WaitForSingleObject(m_hMutex, Timeout);
+            if (wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED)
+            {
+                CloseHandle(m_hMutex);
+                m_hMutex = NULL;
+            }
+        }
+    }
+    ~CScopedMutex()
+    {
+        if (m_hMutex)
+        {
+            ReleaseMutex(m_hMutex);
+            CloseHandle(m_hMutex);
+        }
+    }
+
+    bool Acquired() const { return m_hMutex != NULL; }
 };

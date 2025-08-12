@@ -21,19 +21,34 @@
 
 #include "precomp.h"
 #include <process.h>
+#include <ndk/obfuncs.h> // For NtQueryObject
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
+extern BOOL IsDriveFloppyW(LPCWSTR pszDriveRoot);
+
 typedef struct
 {
-    WCHAR   Drive;
+    WCHAR   Drive; // Note: This is the drive number, not a drive letter
     UINT    Options;
     UINT Result;
     BOOL bFormattingNow;
+    HWND hWndMain;
+    HWND hWndTip, hWndTipTrigger;
+    struct tagTip { UNICODE_STRING Name; WCHAR Buffer[400]; } Tip;
 } FORMAT_DRIVE_CONTEXT, *PFORMAT_DRIVE_CONTEXT;
 
-EXTERN_C HPSXA WINAPI SHCreatePropSheetExtArrayEx(HKEY hKey, LPCWSTR pszSubKey, UINT max_iface, IDataObject *pDataObj);
-HPROPSHEETPAGE SH_CreatePropertySheetPage(LPCSTR resname, DLGPROC dlgproc, LPARAM lParam, LPWSTR szTitle);
+static inline BOOL
+DevIoCtl(HANDLE hDevice, UINT Code, LPVOID pIn, UINT cbIn, LPVOID pOut, UINT cbOut)
+{
+    DWORD cb = 0;
+    return DeviceIoControl(hDevice, Code, pIn, cbIn, pOut, cbOut, &cb, NULL);
+}
+
+static BOOL IsFloppy(PCWSTR pszDrive)
+{
+    return GetDriveTypeW(pszDrive) == DRIVE_REMOVABLE && IsDriveFloppyW(pszDrive);
+}
 
 /*
  * TODO: In Windows the Shell doesn't know by itself if a drive is
@@ -50,18 +65,87 @@ HPROPSHEETPAGE SH_CreatePropertySheetPage(LPCSTR resname, DLGPROC dlgproc, LPARA
 static BOOL
 IsSystemDrive(PFORMAT_DRIVE_CONTEXT pContext)
 {
-    WCHAR wszDriveLetter[6], wszSystemDrv[6];
+    WCHAR wszSystemDrv[MAX_PATH];
+    wszSystemDrv[0] = UNICODE_NULL;
+    GetSystemDirectory(wszSystemDrv, _countof(wszSystemDrv));
+    return (wszSystemDrv[0] | 32) == pContext->Drive + L'a';
+}
 
-    wszDriveLetter[0] = pContext->Drive + L'A';
-    StringCchCatW(wszDriveLetter, _countof(wszDriveLetter), L":");
+static HANDLE
+OpenLogicalDriveHandle(WORD DriveNumber)
+{
+    const WCHAR szPath[] = { '\\', '\\', '?', '\\', WCHAR(DriveNumber + 'A'), ':', '\0' };
+    return CreateFileW(szPath, FILE_READ_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                       NULL, OPEN_EXISTING, 0, NULL);
+}
 
-    if (!GetEnvironmentVariableW(L"SystemDrive", wszSystemDrv, _countof(wszSystemDrv)))
-        return FALSE;
+static BOOL
+GetLogicalDriveSize(WORD DriveNumber, ULARGE_INTEGER &Result)
+{
+    BOOL bSuccess = FALSE;
+    const WCHAR szDrivePath[] = { WCHAR(DriveNumber + 'A'), ':', '\\', '\0' };
 
-    if (!wcsicmp(wszDriveLetter, wszSystemDrv))
-        return TRUE;
+    HANDLE hDevice = OpenLogicalDriveHandle(DriveNumber);
+    if (hDevice != INVALID_HANDLE_VALUE)
+    {
+        GET_LENGTH_INFORMATION LengthInfo;
+        bSuccess = DevIoCtl(hDevice, IOCTL_DISK_GET_LENGTH_INFO, NULL, 0, &LengthInfo, sizeof(LengthInfo));
+        Result.QuadPart = LengthInfo.Length.QuadPart;
+        if (!bSuccess && GetDriveTypeW(szDrivePath) == DRIVE_REMOVABLE) // Blank floppy
+        {
+            DISK_GEOMETRY dg;
+            bSuccess = DevIoCtl(hDevice, IOCTL_DISK_GET_DRIVE_GEOMETRY, NULL, 0, &dg, sizeof(dg));
+            if (bSuccess)
+                Result.QuadPart = dg.Cylinders.QuadPart * dg.TracksPerCylinder * dg.SectorsPerTrack * dg.BytesPerSector;
+        }
+        CloseHandle(hDevice);
+    }
+    if (!bSuccess || !Result.QuadPart)
+        bSuccess = GetDiskFreeSpaceExW(szDrivePath, NULL, &Result, NULL); // Note: Not exact if NTFS quotas are in effect
+    return bSuccess;
+}
 
-    return FALSE;
+static PWSTR
+CreateTipText(FORMAT_DRIVE_CONTEXT &Ctx)
+{
+    HANDLE hDevice = OpenLogicalDriveHandle(Ctx.Drive);
+    if (hDevice == INVALID_HANDLE_VALUE)
+        return NULL;
+
+    ULONG cb;
+    ZeroMemory(&Ctx.Tip, sizeof(Ctx.Tip));
+    NtQueryObject(hDevice, ObjectNameInformation, &Ctx.Tip, sizeof(Ctx.Tip), &cb);
+    if (Ctx.Tip.Name.Buffer && Ctx.Tip.Name.Buffer[0] == '\\')
+        StringCbCatW(Ctx.Tip.Name.Buffer, sizeof(Ctx.Tip) - sizeof(UNICODE_STRING), L"\n");
+    else
+        (Ctx.Tip.Name.Buffer = Ctx.Tip.Buffer)[0] = UNICODE_NULL;
+
+    PARTITION_INFORMATION_EX pie;
+    if (!DevIoCtl(hDevice, IOCTL_DISK_GET_PARTITION_INFO_EX, NULL, 0, &pie, sizeof(pie)))
+    {
+        pie.PartitionStyle = PARTITION_STYLE_RAW;
+        PARTITION_INFORMATION pi;
+        if (DevIoCtl(hDevice, IOCTL_DISK_GET_PARTITION_INFO, NULL, 0, &pi, sizeof(pi)))
+        {
+            pie.PartitionStyle = PARTITION_STYLE_MBR;
+            pie.PartitionNumber = pi.PartitionNumber;
+        }
+    }
+    CloseHandle(hDevice);
+
+    WCHAR szBuf[150], szGuid[39], *pszTip = Ctx.Tip.Name.Buffer;
+    szBuf[0] = UNICODE_NULL;
+    if (pie.PartitionStyle == PARTITION_STYLE_GPT)
+    {
+        StringFromGUID2(pie.Gpt.PartitionId, szGuid, _countof(szGuid));
+        StringCchPrintfW(szBuf, _countof(szBuf), L"GPT %s %s", szGuid, pie.Gpt.Name);
+    }
+    if (pie.PartitionStyle == PARTITION_STYLE_MBR)
+    {
+        StringCchPrintfW(szBuf, _countof(szBuf), L"MBR (%d)", pie.PartitionNumber);
+    }
+    StringCbCatW(pszTip, sizeof(Ctx.Tip) - sizeof(Ctx.Tip.Name), szBuf);
+    return pszTip;
 }
 
 static BOOL
@@ -69,8 +153,8 @@ GetDefaultClusterSize(LPWSTR szFs, PDWORD pClusterSize, PULARGE_INTEGER TotalNum
 {
     DWORD ClusterSize;
 
-    if (!wcsicmp(szFs, L"FAT16") ||
-        !wcsicmp(szFs, L"FAT")) // REACTOS HACK
+    if (!_wcsicmp(szFs, L"FAT16") ||
+        !_wcsicmp(szFs, L"FAT")) // REACTOS HACK
     {
         if (TotalNumberOfBytes->QuadPart <= (16 * 1024 * 1024))
             ClusterSize = 2048;
@@ -93,7 +177,7 @@ GetDefaultClusterSize(LPWSTR szFs, PDWORD pClusterSize, PULARGE_INTEGER TotalNum
         else
             return FALSE;
     }
-    else if (!wcsicmp(szFs, L"FAT32"))
+    else if (!_wcsicmp(szFs, L"FAT32"))
     {
         if (TotalNumberOfBytes->QuadPart <= (64 * 1024 * 1024))
             ClusterSize = 512;
@@ -110,7 +194,7 @@ GetDefaultClusterSize(LPWSTR szFs, PDWORD pClusterSize, PULARGE_INTEGER TotalNum
         else
             return FALSE;
     }
-    else if (!wcsicmp(szFs, L"FATX"))
+    else if (!_wcsicmp(szFs, L"FATX"))
     {
         if (TotalNumberOfBytes->QuadPart <= (16 * 1024 * 1024))
             ClusterSize = 2048;
@@ -131,7 +215,7 @@ GetDefaultClusterSize(LPWSTR szFs, PDWORD pClusterSize, PULARGE_INTEGER TotalNum
         else
             return FALSE;
     }
-    else if (!wcsicmp(szFs, L"NTFS"))
+    else if (!_wcsicmp(szFs, L"NTFS"))
     {
         if (TotalNumberOfBytes->QuadPart <= (512 * 1024 * 1024))
             ClusterSize = 512;
@@ -142,12 +226,12 @@ GetDefaultClusterSize(LPWSTR szFs, PDWORD pClusterSize, PULARGE_INTEGER TotalNum
         else
             ClusterSize = 2048;
     }
-    else if (!wcsicmp(szFs, L"EXT2"))
+    else if (!_wcsicmp(szFs, L"EXT2"))
     {
         // auto block size calculation
         ClusterSize = 0;
     }
-    else if (!wcsicmp(szFs, L"BtrFS"))
+    else if (!_wcsicmp(szFs, L"BtrFS"))
     {
         // auto block size calculation
         ClusterSize = 0;
@@ -159,134 +243,14 @@ GetDefaultClusterSize(LPWSTR szFs, PDWORD pClusterSize, PULARGE_INTEGER TotalNum
     return TRUE;
 }
 
-typedef struct _DRIVE_PROP_PAGE
-{
-    LPCSTR resname;
-    DLGPROC dlgproc;
-    UINT DriveType;
-} DRIVE_PROP_PAGE;
-
-struct DRIVE_PROP_DATA
-{
-    PWSTR pwszDrive;
-    IStream *pStream;
-};
-
-static DWORD WINAPI
-ShowDrivePropThreadProc(LPVOID pParam)
-{
-    CHeapPtr<DRIVE_PROP_DATA, CComAllocator> pPropData((DRIVE_PROP_DATA *)pParam);
-    CHeapPtr<WCHAR, CComAllocator> pwszDrive(pPropData->pwszDrive);
-
-    // Unmarshall IDataObject from IStream
-    CComPtr<IDataObject> pDataObj;
-    CoGetInterfaceAndReleaseStream(pPropData->pStream, IID_PPV_ARG(IDataObject, &pDataObj));
-
-    HPSXA hpsx = NULL;
-    HPROPSHEETPAGE hpsp[MAX_PROPERTY_SHEET_PAGE];
-    CComObject<CDrvDefExt> *pDrvDefExt = NULL;
-
-    CDataObjectHIDA cida(pDataObj);
-    if (FAILED_UNEXPECTEDLY(cida.hr()))
-        return FAILED(cida.hr());
-
-    RECT rcPosition = {CW_USEDEFAULT, CW_USEDEFAULT, 0, 0};
-    POINT pt;
-    if (SUCCEEDED(DataObject_GetOffset(pDataObj, &pt)))
-    {
-        rcPosition.left = pt.x;
-        rcPosition.top = pt.y;
-    }
-
-    DWORD style = WS_DISABLED | WS_CLIPSIBLINGS | WS_CAPTION;
-    DWORD exstyle = WS_EX_WINDOWEDGE | WS_EX_APPWINDOW;
-    CStubWindow32 stub;
-    if (!stub.Create(NULL, rcPosition, NULL, style, exstyle))
-    {
-        ERR("StubWindow32 creation failed\n");
-        return FALSE;
-    }
-
-    PROPSHEETHEADERW psh = {sizeof(PROPSHEETHEADERW)};
-    psh.dwFlags = PSH_PROPTITLE;
-    psh.pszCaption = pwszDrive;
-    psh.hwndParent = stub;
-    psh.nStartPage = 0;
-    psh.phpage = hpsp;
-
-    HRESULT hr = CComObject<CDrvDefExt>::CreateInstance(&pDrvDefExt);
-    if (SUCCEEDED(hr))
-    {
-        pDrvDefExt->AddRef(); // CreateInstance returns object with 0 ref count
-        hr = pDrvDefExt->Initialize(HIDA_GetPIDLFolder(cida), pDataObj, NULL);
-        if (SUCCEEDED(hr))
-        {
-            hr = pDrvDefExt->AddPages(AddPropSheetPageCallback, (LPARAM)&psh);
-            if (FAILED(hr))
-                ERR("AddPages failed\n");
-        }
-        else
-        {
-            ERR("Initialize failed\n");
-        }
-    }
-
-    hpsx = SHCreatePropSheetExtArrayEx(HKEY_CLASSES_ROOT, L"Drive", MAX_PROPERTY_SHEET_PAGE, pDataObj);
-    if (hpsx)
-        SHAddFromPropSheetExtArray(hpsx, (LPFNADDPROPSHEETPAGE)AddPropSheetPageCallback, (LPARAM)&psh);
-
-    INT_PTR ret = PropertySheetW(&psh);
-
-    if (hpsx)
-        SHDestroyPropSheetExtArray(hpsx);
-    if (pDrvDefExt)
-        pDrvDefExt->Release();
-
-    stub.DestroyWindow();
-
-    return ret != -1;
-}
-
-BOOL
-SH_ShowDriveProperties(WCHAR *pwszDrive, IDataObject *pDataObj)
-{
-    HRESULT hr = SHStrDupW(pwszDrive, &pwszDrive);
-    if (FAILED_UNEXPECTEDLY(hr))
-        return FALSE;
-
-    // Prepare data for thread
-    DRIVE_PROP_DATA *pData = (DRIVE_PROP_DATA *)SHAlloc(sizeof(*pData));
-    if (!pData)
-    {
-        SHFree(pwszDrive);
-        return FALSE;
-    }
-    pData->pwszDrive = pwszDrive;
-
-    // Marshall IDataObject to IStream
-    hr = CoMarshalInterThreadInterfaceInStream(IID_IDataObject, pDataObj, &pData->pStream);
-    if (SUCCEEDED(hr))
-    {
-        // Run a property sheet in another thread
-        if (SHCreateThread(ShowDrivePropThreadProc, pData, CTF_COINIT, NULL))
-            return TRUE; // Success
-
-        pData->pStream->Release();
-    }
-    SHFree(pData);
-    SHFree(pwszDrive);
-    return FALSE; // Failed
-}
-
 static VOID
 InsertDefaultClusterSizeForFs(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
 {
     WCHAR wszBuf[100] = {0};
     WCHAR wszDefaultSize[100] = {0};
     PCWSTR pwszFsSizeLimit;
-    WCHAR szDrive[] = L"C:\\";
     INT iSelIndex;
-    ULARGE_INTEGER FreeBytesAvailableUser, TotalNumberOfBytes;
+    ULARGE_INTEGER TotalNumberOfBytes;
     DWORD ClusterSize;
     LRESULT lIndex;
     HWND hDlgCtrl;
@@ -299,29 +263,27 @@ InsertDefaultClusterSizeForFs(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
     if (SendMessageW(hDlgCtrl, CB_GETLBTEXT, iSelIndex, (LPARAM)wszBuf) == CB_ERR)
         return;
 
-    szDrive[0] = pContext->Drive + L'A';
-
-    if (!GetDiskFreeSpaceExW(szDrive, &FreeBytesAvailableUser, &TotalNumberOfBytes, NULL))
+    if (!GetLogicalDriveSize(pContext->Drive, TotalNumberOfBytes))
         return;
 
-    if (!wcsicmp(wszBuf, L"FAT16") ||
-        !wcsicmp(wszBuf, L"FAT")) // REACTOS HACK
+    if (!_wcsicmp(wszBuf, L"FAT16") ||
+        !_wcsicmp(wszBuf, L"FAT")) // REACTOS HACK
     {
         pwszFsSizeLimit = L"4GB";
     }
-    else if (!wcsicmp(wszBuf, L"FAT32"))
+    else if (!_wcsicmp(wszBuf, L"FAT32"))
     {
         pwszFsSizeLimit = L"32GB";
     }
-    else if (!wcsicmp(wszBuf, L"FATX"))
+    else if (!_wcsicmp(wszBuf, L"FATX"))
     {
         pwszFsSizeLimit = L"1GB/32GB";
     }
-    else if (!wcsicmp(wszBuf, L"NTFS"))
+    else if (!_wcsicmp(wszBuf, L"NTFS"))
     {
         pwszFsSizeLimit = L"256TB";
     }
-    else if (!wcsicmp(wszBuf, L"EXT2"))
+    else if (!_wcsicmp(wszBuf, L"EXT2"))
     {
         pwszFsSizeLimit = L"32TB";
     }
@@ -330,13 +292,13 @@ InsertDefaultClusterSizeForFs(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
         pwszFsSizeLimit = L"16EB";
     }
 
-    if (!wcsicmp(wszBuf, L"FAT16") ||
-        !wcsicmp(wszBuf, L"FAT") || // REACTOS HACK
-        !wcsicmp(wszBuf, L"FAT32") ||
-        !wcsicmp(wszBuf, L"FATX") ||
-        !wcsicmp(wszBuf, L"NTFS") ||
-        !wcsicmp(wszBuf, L"EXT2") ||
-        !wcsicmp(wszBuf, L"BtrFS"))
+    if (!_wcsicmp(wszBuf, L"FAT16") ||
+        !_wcsicmp(wszBuf, L"FAT") || // REACTOS HACK
+        !_wcsicmp(wszBuf, L"FAT32") ||
+        !_wcsicmp(wszBuf, L"FATX") ||
+        !_wcsicmp(wszBuf, L"NTFS") ||
+        !_wcsicmp(wszBuf, L"EXT2") ||
+        !_wcsicmp(wszBuf, L"BtrFS"))
     {
         if (!GetDefaultClusterSize(wszBuf, &ClusterSize, &TotalNumberOfBytes))
         {
@@ -355,7 +317,7 @@ InsertDefaultClusterSizeForFs(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
             SendMessageW(hDlgCtrl, CB_SETCURSEL, 0, 0);
         }
 
-        if (!wcsicmp(wszBuf, L"NTFS"))
+        if (!_wcsicmp(wszBuf, L"NTFS"))
         {
             ClusterSize = 512;
             for (lIndex = 0; lIndex < 4; lIndex++)
@@ -372,14 +334,16 @@ InsertDefaultClusterSizeForFs(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
         }
 
         SendMessageW(GetDlgItem(hwndDlg, 28675), BM_SETCHECK, BST_UNCHECKED, 0);
-        if (!wcsicmp(wszBuf, L"EXT2") ||
-            !wcsicmp(wszBuf, L"BtrFS") ||
-            !wcsicmp(wszBuf, L"NTFS"))
+#if 0 // TODO: Call EnableVolumeCompression if checked
+        if (!_wcsicmp(wszBuf, L"EXT2") ||
+            !_wcsicmp(wszBuf, L"BtrFS") ||
+            !_wcsicmp(wszBuf, L"NTFS"))
         {
             /* Enable the "Enable Compression" button */
             EnableWindow(GetDlgItem(hwndDlg, 28675), TRUE);
         }
         else
+#endif
         {
             /* Disable the "Enable Compression" button */
             EnableWindow(GetDlgItem(hwndDlg, 28675), FALSE);
@@ -394,23 +358,48 @@ InsertDefaultClusterSizeForFs(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
 }
 
 static VOID
+EnableFormatDriveDlgControls(HWND hwndDlg, int EnableState)
+{
+    BOOL CanClose = EnableState != 0, Enable = EnableState > 0;
+    HMENU hSysMenu = GetSystemMenu(hwndDlg, FALSE);
+    EnableMenuItem(hSysMenu, SC_CLOSE, MF_BYCOMMAND | (CanClose ? MF_ENABLED : MF_GRAYED));
+    EnableWindow(GetDlgItem(hwndDlg, IDCANCEL), CanClose);
+    static const WORD id[] = { IDOK, 28673, 28677, 28680, 28679, 28674 };
+    for (UINT i = 0; i < _countof(id); ++i)
+        EnableWindow(GetDlgItem(hwndDlg, id[i]), Enable);
+}
+
+static VOID
 InitializeFormatDriveDlg(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
 {
-    WCHAR szText[120];
-    WCHAR szDrive[] = L"C:\\";
-    WCHAR szFs[30] = L"";
-    INT cchText;
-    ULARGE_INTEGER FreeBytesAvailableUser, TotalNumberOfBytes;
+    WCHAR szDrive[] = { WCHAR(pContext->Drive + 'A'), ':', '\\', '\0' };
+    WCHAR szText[120], szFs[30];
+    SIZE_T cchText;
+    ULARGE_INTEGER TotalNumberOfBytes;
     DWORD dwIndex, dwDefault;
     UCHAR uMinor, uMajor;
     BOOLEAN Latest;
     HWND hwndFileSystems;
 
+    pContext->hWndMain = hwndDlg;
+    pContext->hWndTipTrigger = GetDlgItem(hwndDlg, 30000);
+    TTTOOLINFOW tool;
+    tool.cbSize = sizeof(tool);
+    tool.hwnd = hwndDlg;
+    tool.uFlags = TTF_SUBCLASS | TTF_IDISHWND | TTF_TRACK | TTF_ABSOLUTE;
+    tool.uId = (UINT_PTR)pContext->hWndTipTrigger;
+    tool.lpszText = LPSTR_TEXTCALLBACKW;
+    pContext->hWndTip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, NULL, WS_POPUP |
+                                        TTS_BALLOON | TTS_NOPREFIX | TTS_ALWAYSTIP,
+                                        0, 0, 0, 0, hwndDlg, NULL, NULL, NULL);
+    SendMessageW(pContext->hWndTip, TTM_ADDTOOLW, 0, (LPARAM)&tool);
+    UINT nIcoSize = GetSystemMetrics(SM_CXSMICON);
+    HICON hIco = (HICON)LoadImageW(shell32_hInstance, MAKEINTRESOURCEW(IDI_SHELL_IDEA), IMAGE_ICON, nIcoSize, nIcoSize, LR_SHARED);
+    SendMessageW(pContext->hWndTipTrigger, STM_SETICON, (WPARAM)hIco, 0);
+
     cchText = GetWindowTextW(hwndDlg, szText, _countof(szText) - 1);
-    if (cchText < 0)
-        cchText = 0;
     szText[cchText++] = L' ';
-    szDrive[0] = pContext->Drive + L'A';
+    szFs[0] = UNICODE_NULL;
     if (GetVolumeInformationW(szDrive, &szText[cchText], _countof(szText) - cchText, NULL, NULL, NULL, szFs, _countof(szFs)))
     {
         if (szText[cchText] == UNICODE_NULL)
@@ -431,7 +420,7 @@ InitializeFormatDriveDlg(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
     /* set window text */
     SetWindowTextW(hwndDlg, szText);
 
-    if (GetDiskFreeSpaceExW(szDrive, &FreeBytesAvailableUser, &TotalNumberOfBytes, NULL))
+    if (GetLogicalDriveSize(pContext->Drive, TotalNumberOfBytes))
     {
         if (StrFormatByteSizeW(TotalNumberOfBytes.QuadPart, szText, _countof(szText)))
         {
@@ -439,6 +428,11 @@ InitializeFormatDriveDlg(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
             SendDlgItemMessageW(hwndDlg, 28673, CB_ADDSTRING, 0, (LPARAM)szText);
             SendDlgItemMessageW(hwndDlg, 28673, CB_SETCURSEL, 0, (LPARAM)0);
         }
+    }
+    else
+    {
+        /* No known size, don't allow format (no partition or no floppy) */
+        EnableFormatDriveDlgControls(hwndDlg, -1);
     }
 
     if (pContext->Options & SHFMT_OPT_FULL)
@@ -452,9 +446,13 @@ InitializeFormatDriveDlg(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
     dwDefault = 0;
     hwndFileSystems = GetDlgItem(hwndDlg, 28677);
 
-    while(QueryAvailableFileSystemFormat(dwIndex, szText, &uMajor, &uMinor, &Latest))
+    int iForceDefault = -1;
+    while (QueryAvailableFileSystemFormat(dwIndex, szText, &uMajor, &uMinor, &Latest))
     {
-        if (!wcsicmp(szText, szFs))
+        if (!_wcsicmp(szText, szFs))
+            iForceDefault = dwDefault = dwIndex; /* default to the same filesystem */
+
+        if (iForceDefault < 0 && !_wcsicmp(szText, L"NTFS") && !IsFloppy(szDrive))
             dwDefault = dwIndex;
 
         SendMessageW(hwndFileSystems, CB_ADDSTRING, 0, (LPARAM)szText);
@@ -473,8 +471,12 @@ InitializeFormatDriveDlg(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
     InsertDefaultClusterSizeForFs(hwndDlg, pContext);
 }
 
-static HWND FormatDrvDialog = NULL;
-static BOOLEAN bSuccess = FALSE;
+static inline PFORMAT_DRIVE_CONTEXT
+GetFormatContext()
+{
+    // FormatEx does not allow us to specify a context parameter so we have to store it in the thread
+    return (PFORMAT_DRIVE_CONTEXT)NtCurrentTeb()->NtTib.ArbitraryUserPointer;
+}
 
 static BOOLEAN NTAPI
 FormatExCB(
@@ -482,26 +484,32 @@ FormatExCB(
     IN ULONG SubAction,
     IN PVOID ActionInfo)
 {
+    PFORMAT_DRIVE_CONTEXT pCtx = GetFormatContext();
+    const WCHAR szDrive[] = { WCHAR(pCtx->Drive + 'A'), ':', '\\', '\0' };
+    WCHAR szLabel[40];
     PDWORD Progress;
     PBOOLEAN pSuccess;
     switch(Command)
     {
         case PROGRESS:
             Progress = (PDWORD)ActionInfo;
-            SendDlgItemMessageW(FormatDrvDialog, 28678, PBM_SETPOS, (WPARAM)*Progress, 0);
+            SendDlgItemMessageW(pCtx->hWndMain, 28678, PBM_SETPOS, (WPARAM)*Progress, 0);
             break;
         case DONE:
             pSuccess = (PBOOLEAN)ActionInfo;
-            bSuccess = (*pSuccess);
-            ShellMessageBoxW(shell32_hInstance, FormatDrvDialog, MAKEINTRESOURCEW(IDS_FORMAT_COMPLETE), MAKEINTRESOURCEW(IDS_FORMAT_TITLE), MB_OK | MB_ICONINFORMATION);
-            SendDlgItemMessageW(FormatDrvDialog, 28678, PBM_SETPOS, 0, 0);
+            pCtx->Result = (*pSuccess);
+            SendDlgItemMessageW(pCtx->hWndMain, 28679, WM_GETTEXT, _countof(szLabel), (LPARAM)szLabel);
+            SetVolumeLabelW(szDrive, *szLabel ? szLabel : NULL);
+            ShellMessageBoxW(shell32_hInstance, pCtx->hWndMain, MAKEINTRESOURCEW(IDS_FORMAT_COMPLETE),
+                             MAKEINTRESOURCEW(IDS_FORMAT_TITLE), MB_OK | MB_ICONINFORMATION);
+            SendDlgItemMessageW(pCtx->hWndMain, 28678, PBM_SETPOS, 0, 0);
             break;
 
         case VOLUMEINUSE:
         case INSUFFICIENTRIGHTS:
         case FSNOTSUPPORTED:
         case CLUSTERSIZETOOSMALL:
-            bSuccess = FALSE;
+            pCtx->Result = FALSE;
             FIXME("Unsupported command in FormatExCB\n");
             break;
 
@@ -512,12 +520,12 @@ FormatExCB(
     return TRUE;
 }
 
-VOID
+static VOID
 FormatDrive(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
 {
-    WCHAR szDrive[4] = { L'C', ':', '\\', 0 };
-    WCHAR szFileSys[40] = {0};
-    WCHAR szLabel[40] = {0};
+    WCHAR szDrive[] = { WCHAR(pContext->Drive + 'A'), ':', '\\', '\0' };
+    WCHAR szFileSys[40];
+    WCHAR szLabel[40];
     INT iSelIndex;
     UINT Length;
     HWND hDlgCtrl;
@@ -525,9 +533,6 @@ FormatDrive(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
     DWORD ClusterSize;
     DWORD DriveType;
     FMIFS_MEDIA_FLAG MediaFlag = FMIFS_HARDDISK;
-
-    /* set volume path */
-    szDrive[0] = pContext->Drive + L'A';
 
     /* get filesystem */
     hDlgCtrl = GetDlgItem(hwndDlg, 28677);
@@ -582,13 +587,6 @@ FormatDrive(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
 
     hDlgCtrl = GetDlgItem(hwndDlg, 28680);
     SendMessageW(hDlgCtrl, PBM_SETRANGE, 0, MAKELPARAM(0, 100));
-    bSuccess = FALSE;
-
-    /* FIXME
-     * will cause display problems
-     * when performing more than one format
-     */
-    FormatDrvDialog = hwndDlg;
 
     /* See if the drive is removable or not */
     DriveType = GetDriveTypeW(szDrive);
@@ -614,6 +612,11 @@ FormatDrive(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
     }
 
     /* Format the drive */
+    pContext->Result = FALSE;
+    NT_TIB &tib = NtCurrentTeb()->NtTib;
+    PVOID BakArbitraryUserPointer = tib.ArbitraryUserPointer;
+    tib.ArbitraryUserPointer = pContext;
+
     FormatEx(szDrive,
              MediaFlag,
              szFileSys,
@@ -622,8 +625,8 @@ FormatDrive(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
              ClusterSize,
              FormatExCB);
 
-    FormatDrvDialog = NULL;
-    if (!bSuccess)
+    tib.ArbitraryUserPointer = BakArbitraryUserPointer;
+    if (!pContext->Result)
     {
         pContext->Result = SHFMT_ERROR;
     }
@@ -637,62 +640,48 @@ FormatDrive(HWND hwndDlg, PFORMAT_DRIVE_CONTEXT pContext)
     }
 }
 
-struct FORMAT_DRIVE_PARAMS
-{
-    HWND hwndDlg;
-    PFORMAT_DRIVE_CONTEXT pContext;
-};
 
-static unsigned __stdcall DoFormatDrive(void *args)
-{
-    FORMAT_DRIVE_PARAMS *pParams = reinterpret_cast<FORMAT_DRIVE_PARAMS *>(args);
-    HWND hwndDlg = pParams->hwndDlg;
-    PFORMAT_DRIVE_CONTEXT pContext = pParams->pContext;
 
-	/* Disable controls during format */
-    HMENU hSysMenu = GetSystemMenu(hwndDlg, FALSE);
-    EnableMenuItem(hSysMenu, SC_CLOSE, MF_BYCOMMAND | MF_GRAYED);
-    EnableWindow(GetDlgItem(hwndDlg, IDOK), FALSE);
-    EnableWindow(GetDlgItem(hwndDlg, IDCANCEL), FALSE);
-    EnableWindow(GetDlgItem(hwndDlg, 28673), FALSE);
-    EnableWindow(GetDlgItem(hwndDlg, 28677), FALSE);
-    EnableWindow(GetDlgItem(hwndDlg, 28680), FALSE);
-    EnableWindow(GetDlgItem(hwndDlg, 28679), FALSE);
-    EnableWindow(GetDlgItem(hwndDlg, 28674), FALSE);
+static DWORD CALLBACK
+FormatDriveThread(PVOID pThreadParameter)
+{
+    PFORMAT_DRIVE_CONTEXT pContext = (PFORMAT_DRIVE_CONTEXT)pThreadParameter;
+    HWND hwndDlg = pContext->hWndMain;
+    WCHAR szDrive[] = { WCHAR(pContext->Drive + 'A'), ':', '\\', '\0' };
+
+    /* Disable controls during format */
+    EnableFormatDriveDlgControls(hwndDlg, FALSE);
+
+    SHChangeNotify(SHCNE_MEDIAREMOVED, SHCNF_PATHW | SHCNF_FLUSH, szDrive, NULL);
 
     FormatDrive(hwndDlg, pContext);
 
-	/* Re-enable controls after format */
-    EnableWindow(GetDlgItem(hwndDlg, IDOK), TRUE);
-    EnableWindow(GetDlgItem(hwndDlg, IDCANCEL), TRUE);
-    EnableWindow(GetDlgItem(hwndDlg, 28673), TRUE);
-    EnableWindow(GetDlgItem(hwndDlg, 28677), TRUE);
-    EnableWindow(GetDlgItem(hwndDlg, 28680), TRUE);
-    EnableWindow(GetDlgItem(hwndDlg, 28679), TRUE);
-    EnableWindow(GetDlgItem(hwndDlg, 28674), TRUE);
-    EnableMenuItem(hSysMenu, SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+    if (pContext->Result != SHFMT_ERROR)
+        SHChangeNotify(SHCNE_MEDIAINSERTED, SHCNF_PATHW, szDrive, NULL);
+    SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, szDrive, NULL);
+
+    /* Re-enable controls after format */
+    EnableFormatDriveDlgControls(hwndDlg, TRUE);
     pContext->bFormattingNow = FALSE;
 
-    delete pParams;
     return 0;
 }
 
 static INT_PTR CALLBACK
 FormatDriveDlg(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    PFORMAT_DRIVE_CONTEXT pContext;
+    PFORMAT_DRIVE_CONTEXT pContext = (PFORMAT_DRIVE_CONTEXT)GetWindowLongPtr(hwndDlg, DWLP_USER);
 
     switch(uMsg)
     {
         case WM_INITDIALOG:
-            InitializeFormatDriveDlg(hwndDlg, (PFORMAT_DRIVE_CONTEXT)lParam);
             SetWindowLongPtr(hwndDlg, DWLP_USER, (LONG_PTR)lParam);
+            InitializeFormatDriveDlg(hwndDlg, (PFORMAT_DRIVE_CONTEXT)lParam);
             return TRUE;
         case WM_COMMAND:
             switch(LOWORD(wParam))
             {
                 case IDOK:
-                    pContext = (PFORMAT_DRIVE_CONTEXT)GetWindowLongPtr(hwndDlg, DWLP_USER);
                     if (pContext->bFormattingNow)
                         break;
 
@@ -702,18 +691,10 @@ FormatDriveDlg(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                                          MB_OKCANCEL | MB_ICONWARNING) == IDOK)
                     {
                         pContext->bFormattingNow = TRUE;
-
-                        FORMAT_DRIVE_PARAMS *pParams = new FORMAT_DRIVE_PARAMS;
-                        pParams->hwndDlg = hwndDlg;
-                        pParams->pContext = pContext;
-
-                        unsigned tid;
-                        HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, DoFormatDrive, pParams, 0, &tid);
-                        CloseHandle(hThread);
+                        SHCreateThread(FormatDriveThread, pContext, CTF_COINIT | CTF_PROCESS_REF | CTF_FREELIBANDEXIT, NULL);
                     }
                     break;
                 case IDCANCEL:
-                    pContext = (PFORMAT_DRIVE_CONTEXT)GetWindowLongPtr(hwndDlg, DWLP_USER);
                     if (pContext->bFormattingNow)
                         break;
 
@@ -722,7 +703,6 @@ FormatDriveDlg(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                 case 28677: // filesystem combo
                     if (HIWORD(wParam) == CBN_SELENDOK)
                     {
-                        pContext = (PFORMAT_DRIVE_CONTEXT)GetWindowLongPtr(hwndDlg, DWLP_USER);
                         if (pContext->bFormattingNow)
                             break;
 
@@ -730,6 +710,45 @@ FormatDriveDlg(HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam)
                     }
                     break;
             }
+            break;
+        case WM_NOTIFY:
+        {
+            NMTTDISPINFO &ttdi = *(NMTTDISPINFO*)lParam;
+            if (ttdi.hdr.code == TTN_NEEDTEXTW)
+            {
+                ttdi.uFlags |= TTF_DI_SETITEM;
+                if (PWSTR pszTip = CreateTipText(*pContext))
+                    ttdi.lpszText = pszTip;
+            }
+            break;
+        }
+        case WM_NEXTDLGCTL:
+            PostMessage(hwndDlg, WM_APP, TRUE, 0); // Delay our action until after focus has changed
+            break;
+        case WM_APP: // Show/Hide tip if tabbed to the info icon
+        {
+            TTTOOLINFOW tool;
+            tool.cbSize = sizeof(tool);
+            tool.hwnd = hwndDlg;
+            tool.uId = (UINT_PTR)pContext->hWndTipTrigger;
+            if (wParam && GetFocus() == pContext->hWndTipTrigger)
+            {
+                RECT r;
+                GetWindowRect(pContext->hWndTipTrigger, &r);
+                r.left += (r.right - r.left) / 2;
+                r.top += (r.bottom - r.top) / 2;
+                SendMessageW(pContext->hWndTip, TTM_TRACKPOSITION, 0, MAKELONG(r.left, r.top));
+                SendMessageW(pContext->hWndTip, TTM_TRACKACTIVATE, TRUE, (LPARAM)&tool);
+            }
+            else
+            {
+                SendMessageW(pContext->hWndTip, TTM_TRACKACTIVATE, FALSE, (LPARAM)&tool);
+            }
+            break;
+        }
+        case WM_MOVING:
+            SendMessage(hwndDlg, WM_APP, FALSE, 0);
+            break;
     }
     return FALSE;
 }

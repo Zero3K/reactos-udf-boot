@@ -168,22 +168,6 @@ InitVideo(VOID)
     if (!NT_SUCCESS(Status))
         return Status;
 
-    /* Check if we had any success */
-    if (!gpPrimaryGraphicsDevice)
-    {
-        /* Check if there is a VGA device we skipped */
-        if (gpVgaGraphicsDevice)
-        {
-            /* There is, use the VGA device */
-            gpPrimaryGraphicsDevice = gpVgaGraphicsDevice;
-        }
-        else
-        {
-            ERR("No usable display driver was found.\n");
-            return STATUS_UNSUCCESSFUL;
-        }
-    }
-
     InitSysParams();
 
     return STATUS_SUCCESS;
@@ -261,6 +245,22 @@ UserEnumDisplayDevices(
         return STATUS_UNSUCCESSFUL;
     }
 
+    if (!pustrDevice)
+    {
+        pdo = pGraphicsDevice->PhysDeviceHandle;
+    }
+    else
+    {
+        EngpUpdateMonitorDevices(pGraphicsDevice);
+        if (iDevNum >= pGraphicsDevice->dwMonCnt)
+        {
+            TRACE("No monitor #%u for '%wZ'\n", iDevNum + 1, pustrDevice);
+            return STATUS_UNSUCCESSFUL;
+        }
+        pdo = pGraphicsDevice->pvMonDev[iDevNum].pdo;
+    }
+
+
     /* Open the device map registry key */
     Status = RegOpenKey(KEY_VIDEO, &hkey);
     if (!NT_SUCCESS(Status))
@@ -282,22 +282,30 @@ UserEnumDisplayDevices(
     ZwClose(hkey);
 
     /* Copy device name, device string and StateFlags */
-    RtlStringCbCopyW(pdispdev->DeviceName, sizeof(pdispdev->DeviceName), pGraphicsDevice->szWinDeviceName);
-    RtlStringCbCopyW(pdispdev->DeviceString, sizeof(pdispdev->DeviceString), pGraphicsDevice->pwszDescription);
-    pdispdev->StateFlags = pGraphicsDevice->StateFlags;
+    if (!pustrDevice)
+    {
+        RtlStringCbCopyW(pdispdev->DeviceName, sizeof(pdispdev->DeviceName), pGraphicsDevice->szWinDeviceName);
+        RtlStringCbCopyW(pdispdev->DeviceString, sizeof(pdispdev->DeviceString), pGraphicsDevice->pwszDescription);
+        pdispdev->StateFlags = pGraphicsDevice->StateFlags;
+    }
+    else
+    {
+        swprintf(pdispdev->DeviceName, L"%ws\\Monitor%u", pGraphicsDevice->szWinDeviceName, iDevNum);
+        if (pdo)
+        {
+            Status = IoGetDeviceProperty(pdo,
+                                         DevicePropertyDeviceDescription,
+                                         sizeof(pdispdev->DeviceString),
+                                         pdispdev->DeviceString,
+                                         &dwLength);
+            if (!NT_SUCCESS(Status))
+                pdispdev->DeviceString[0] = UNICODE_NULL;
+        }
+        pdispdev->StateFlags = pGraphicsDevice->pvMonDev[iDevNum].flag;
+    }
     pdispdev->DeviceID[0] = UNICODE_NULL;
 
     /* Fill in DeviceID */
-    if (!pustrDevice)
-        pdo = pGraphicsDevice->PhysDeviceHandle;
-    else
-#if 0
-        pdo = pGraphicsDevice->pvMonDev[iDevNum].pdo;
-#else
-        /* FIXME: pvMonDev not initialized, see EngpRegisterGraphicsDevice */
-        pdo = NULL;
-#endif
-
     if (pdo != NULL)
     {
         Status = IoGetDeviceProperty(pdo,
@@ -405,10 +413,6 @@ NtUserEnumDisplayDevices(
         else
             pustrDevice = NULL;
    }
-
-    /* If name is given only iDevNum==0 gives results */
-    if (pustrDevice && iDevNum != 0)
-        return FALSE;
 
     /* Acquire global USER lock */
     UserEnterShared();

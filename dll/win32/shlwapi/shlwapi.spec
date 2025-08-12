@@ -360,7 +360,7 @@
 360 stdcall -noname RemoveDirectoryWrapW(wstr) kernel32.RemoveDirectoryW
 361 stdcall -noname GetShortPathNameWrapW(wstr ptr long) kernel32.GetShortPathNameW
 362 stdcall -noname GetUserNameWrapW(ptr ptr) advapi32.GetUserNameW
-363 stdcall -noname SHInvokeCommand(ptr ptr ptr long)
+363 stdcall -noname SHInvokeCommand(ptr ptr ptr str)
 364 stdcall -noname DoesStringRoundTripA(str ptr long)
 365 stdcall -noname DoesStringRoundTripW(wstr ptr long)
 366 stdcall -noname RegEnumValueWrapW(long long ptr ptr ptr ptr ptr ptr) advapi32.RegEnumValueW
@@ -464,9 +464,9 @@
 464 stdcall -noname SHExpandEnvironmentStringsForUserW(ptr wstr ptr long) userenv.ExpandEnvironmentStringsForUserW
 465 stub -noname PathUnExpandEnvStringsForUserA
 466 stdcall -stub -noname PathUnExpandEnvStringsForUserW(ptr wstr ptr long)
-467 stub -ordinal SHRunIndirectRegClientCommand
-468 stub -noname RunIndirectRegCommand
-469 stub -noname RunRegCommand
+467 stdcall -ordinal SHRunIndirectRegClientCommand(ptr wstr) # Exported by name in Vista+
+468 stdcall -noname RunIndirectRegCommand(ptr ptr wstr wstr)
+469 stdcall -noname RunRegCommand(ptr ptr wstr)
 470 stub -noname IUnknown_ProfferServiceOld
 471 stdcall -noname SHCreatePropertyBagOnRegKey(ptr wstr long ptr ptr)
 472 stdcall -noname SHCreatePropertyBagOnProfileSection(wstr wstr long ptr ptr)
@@ -534,11 +534,11 @@
 534 stdcall -noname SHPropertyBag_ReadBOOL(ptr wstr ptr)
 535 stdcall -noname SHPropertyBag_Delete(ptr wstr)
 536 stdcall -noname IUnknown_QueryServicePropertyBag(ptr long ptr ptr)
-537 stub -noname SHBoolSystemParametersInfo
+537 stdcall -noname SHBoolSystemParametersInfo(long ptr)
 538 stdcall -noname IUnknown_QueryServiceForWebBrowserApp(ptr ptr ptr)
 539 stub -noname IUnknown_ShowBrowserBar
-540 stub -noname SHInvokeCommandOnContextMenu
-541 stub -noname SHInvokeCommandsOnContextMen
+540 stdcall -noname SHInvokeCommandOnContextMenu(ptr ptr ptr long str)
+541 stub -noname SHInvokeCommandsOnContextMenu
 542 stdcall -noname GetUIVersion()
 543 stdcall -noname CreateColorSpaceWrapW(ptr) gdi32.CreateColorSpaceW
 544 stub -noname QuerySourceCreateFromKey
@@ -568,7 +568,8 @@
 568 stdcall AssocQueryStringW(long long wstr wstr ptr ptr)
 569 stdcall ChrCmpIA(long long)
 570 stdcall ChrCmpIW(long long)
-571 stdcall ColorAdjustLuma(long long long)
+571 stdcall -noname -version=0x600+ SHInvokeCommandWithFlagsAndSite(ptr ptr ptr ptr long str)
+@ stdcall ColorAdjustLuma(long long long)
 572 stdcall ColorHLSToRGB(long long long)
 573 stdcall ColorRGBToHLS(long ptr ptr ptr)
 @ stdcall -private DllGetVersion(ptr)
@@ -636,7 +637,8 @@
 636 stdcall PathIsSameRootA(str str)
 637 stdcall PathIsSameRootW(wstr wstr)
 638 stdcall PathIsSystemFolderA(str long)
-639 stdcall PathIsSystemFolderW(wstr long)
+639 stdcall -noname -version=0x600+ SHInvokeCommandOnContextMenuEx(ptr ptr ptr long long str wstr)
+@ stdcall PathIsSystemFolderW(wstr long)
 640 stdcall PathIsUNCA(str)
 641 stdcall PathIsUNCServerA(str)
 642 stdcall PathIsUNCServerShareA(str)

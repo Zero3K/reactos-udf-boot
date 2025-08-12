@@ -25,9 +25,45 @@
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
+extern BOOL SHELL32_IsShellFolderNamespaceItemHidden(LPCWSTR SubKey, REFCLSID Clsid);
+
+static const REQUIREDREGITEM g_RequiredItems[] =
+{
+    { CLSID_MyComputer, "sysdm.cpl", REGITEMORDER_MYCOMPUTER },
+    { CLSID_NetworkPlaces, "ncpa.cpl", REGITEMORDER_NETHOOD },
+    { CLSID_Internet, "inetcpl.cpl", REGITEMORDER_INTERNET },
+};
+static const REGFOLDERINFO g_RegFolderInfo =
+{
+    PT_DESKTOP_REGITEM,
+    _countof(g_RequiredItems), g_RequiredItems,
+    CLSID_ShellDesktop,
+    L"",
+    L"Desktop",
+};
+
 static BOOL IsSelf(UINT cidl, PCUITEMID_CHILD_ARRAY apidl)
 {
     return cidl == 0 || (cidl == 1 && apidl && _ILIsEmpty(apidl[0]));
+}
+
+static const CLSID* IsRegItem(PCUITEMID_CHILD pidl)
+{
+    if (pidl && pidl->mkid.cb == 2 + 2 + sizeof(CLSID) && pidl->mkid.abID[0] == PT_DESKTOP_REGITEM)
+        return (const CLSID*)(&pidl->mkid.abID[2]);
+    return NULL;
+}
+
+static bool IsRegItem(PCUITEMID_CHILD pidl, REFCLSID clsid)
+{
+    const CLSID *pClass = IsRegItem(pidl);
+    return pClass && *pClass == clsid;
+}
+
+static inline void MarkAsCommonItem(LPITEMIDLIST pidl)
+{
+    ASSERT(_ILGetFSType(pidl) & PT_FS);
+    ((PIDLDATA*)pidl->mkid.abID)->type |= PT_FS_COMMON_FLAG;
 }
 
 STDMETHODIMP
@@ -153,48 +189,12 @@ The CDesktopFolderEnum class should create two enumerators, one for each of the 
 system folders, and enumerate the contents of each folder. Since the CRegFolder
 implementation of IShellFolder::EnumObjects enumerates the virtual items, the
 CDesktopFolderEnum is only responsible for returning the physical items.
-CDesktopFolderEnum is incorrect where it filters My Computer from the enumeration
-if the new start menu is used. The CDesktopViewCallback is responsible for filtering
-it from the view by handling the IncludeObject query to return S_FALSE. The enumerator
-always shows My Computer.
+CDesktopFolderViewCB is responsible for filtering hidden regitems.
+The enumerator always shows My Computer.
 */
 
 /* Undocumented functions from shdocvw */
 extern "C" HRESULT WINAPI IEParseDisplayNameWithBCW(DWORD codepage, LPCWSTR lpszDisplayName, LPBC pbc, LPITEMIDLIST *ppidl);
-
-static const WCHAR ClassicStartMenuW[] = L"SOFTWARE\\Microsoft\\Windows\\"
-    L"CurrentVersion\\Explorer\\HideDesktopIcons\\ClassicStartMenu";
-
-static INT
-IsNamespaceExtensionHidden(const WCHAR *iid)
-{
-    DWORD Result, dwResult;
-    dwResult = sizeof(DWORD);
-
-    if (RegGetValueW(HKEY_CURRENT_USER, /* FIXME use NewStartPanel when activated */
-                     ClassicStartMenuW,
-                     iid,
-                     RRF_RT_DWORD,
-                     NULL,
-                     &Result,
-                     &dwResult) != ERROR_SUCCESS)
-    {
-        return -1;
-    }
-
-    return Result;
-}
-
-static INT IsNamespaceExtensionHidden(LPCITEMIDLIST pidl)
-{
-    GUID const *clsid = _ILGetGUIDPointer (pidl);
-    if (!clsid)
-        return -1;
-
-    WCHAR pwszGuid[CHARS_IN_GUID];
-    SHELL32_GUIDToStringW(*clsid, pwszGuid);
-    return IsNamespaceExtensionHidden(pwszGuid);
-}
 
 class CDesktopFolderEnum :
     public CEnumIDListBase
@@ -204,84 +204,30 @@ class CDesktopFolderEnum :
 //    CComPtr                                fCommonDesktopEnumerator;
     public:
 
-        void AddItemsFromClassicStartMenuKey(HKEY hKeyRoot)
+        HRESULT WINAPI Initialize(IShellFolder *pRegFolder, SHCONTF dwFlags, IEnumIDList *pRegEnumerator,
+                                  IEnumIDList *pDesktopEnumerator, IEnumIDList *pCommonDesktopEnumerator)
         {
-            DWORD dwResult;
-            HKEY hkey;
-            DWORD j = 0, dwVal, Val, dwType, dwIID;
-            LONG r;
-            WCHAR iid[50];
-            LPITEMIDLIST pidl;
-
-            dwResult = RegOpenKeyExW(hKeyRoot, ClassicStartMenuW, 0, KEY_READ, &hkey);
-            if (dwResult != ERROR_SUCCESS)
-                return;
-
-            while(1)
-            {
-                dwVal = sizeof(Val);
-                dwIID = sizeof(iid) / sizeof(WCHAR);
-
-                r = RegEnumValueW(hkey, j++, iid, &dwIID, NULL, &dwType, (LPBYTE)&Val, &dwVal);
-                if (r != ERROR_SUCCESS)
-                    break;
-
-                if (Val == 0 && dwType == REG_DWORD)
-                {
-                    pidl = _ILCreateGuidFromStrW(iid);
-                    if (pidl != NULL)
-                    {
-                        if (!HasItemWithCLSID(pidl))
-                            AddToEnumList(pidl);
-                        else
-                            SHFree(pidl);
-                    }
-                }
-            }
-            RegCloseKey(hkey);
-        }
-
-        HRESULT WINAPI Initialize(DWORD dwFlags,IEnumIDList * pRegEnumerator, IEnumIDList *pDesktopEnumerator, IEnumIDList *pCommonDesktopEnumerator)
-        {
-            BOOL ret = TRUE;
-            LPITEMIDLIST pidl;
-
-            static const WCHAR MyDocumentsClassString[] = L"{450D8FBA-AD25-11D0-98A8-0800361B1103}";
-            static const WCHAR InternetClassString[] = L"{871C5380-42A0-1069-A2EA-08002B30309D}";
-
             TRACE("(%p)->(flags=0x%08x)\n", this, dwFlags);
 
-            /* enumerate the root folders */
-            if (dwFlags & SHCONTF_FOLDERS)
-            {
-                AddToEnumList(_ILCreateMyComputer());
-                if (IsNamespaceExtensionHidden(MyDocumentsClassString) < 1)
-                    AddToEnumList(_ILCreateMyDocuments());
-                if (IsNamespaceExtensionHidden(InternetClassString) < 1)
-                    AddToEnumList(_ILCreateIExplore());
-
-                DWORD dwFetched;
-                while((S_OK == pRegEnumerator->Next(1, &pidl, &dwFetched)) && dwFetched)
-                {
-                    if (IsNamespaceExtensionHidden(pidl) < 1)
-                    {
-                        if (!HasItemWithCLSID(pidl))
-                            AddToEnumList(pidl);
-                        else
-                            SHFree(pidl);
-                    }
-                }
-                AddItemsFromClassicStartMenuKey(HKEY_LOCAL_MACHINE);
-                AddItemsFromClassicStartMenuKey(HKEY_CURRENT_USER);
-            }
+            AppendItemsFromEnumerator(pRegEnumerator);
 
             /* Enumerate the items in the two fs folders */
             AppendItemsFromEnumerator(pDesktopEnumerator);
+            ENUMLIST *pCommon = this->mpLast;
             AppendItemsFromEnumerator(pCommonDesktopEnumerator);
-
-            return ret ? S_OK : E_FAIL;
+            if (pCommon != this->mpLast) // Any common items added?
+            {
+                ENUMLIST fake;
+                if (!pCommon) // In the unlikely case that there are no RegItems nor user items
+                {
+                    fake.pNext = this->mpFirst;
+                    pCommon = &fake;
+                }
+                while ((pCommon = pCommon->pNext) != NULL)
+                    MarkAsCommonItem(pCommon->pidl);
+            }
+            return S_OK;
         }
-
 
         BEGIN_COM_MAP(CDesktopFolderEnum)
         COM_INTERFACE_ENTRY_IID(IID_IEnumIDList, IEnumIDList)
@@ -337,10 +283,9 @@ HRESULT WINAPI CDesktopFolder::FinalConstruct()
         return hr;
 
     /* Create the inner reg folder */
-    hr = CRegFolder_CreateInstance(&CLSID_ShellDesktop,
+    REGFOLDERINITDATA RegInit = { static_cast<IShellFolder*>(this), &g_RegFolderInfo };
+    hr = CRegFolder_CreateInstance(&RegInit,
                                    pidlRoot,
-                                   L"",
-                                   L"Desktop",
                                    IID_PPV_ARG(IShellFolder2, &m_regFolder));
     if (FAILED_UNEXPECTEDLY(hr))
         return hr;
@@ -359,22 +304,20 @@ HRESULT WINAPI CDesktopFolder::FinalConstruct()
 
 HRESULT CDesktopFolder::_GetSFFromPidl(LPCITEMIDLIST pidl, IShellFolder2** psf)
 {
-    WCHAR szFileName[MAX_PATH];
-
-    if (_ILIsSpecialFolder(pidl))
+    if (IsRegItem(pidl))
         return m_regFolder->QueryInterface(IID_PPV_ARG(IShellFolder2, psf));
-
-    lstrcpynW(szFileName, sPathTarget, MAX_PATH - 1);
-    PathAddBackslashW(szFileName);
-    int cLen = wcslen(szFileName);
-
-    if (!_ILSimpleGetTextW(pidl, szFileName + cLen, MAX_PATH - cLen))
-        return E_FAIL;
-
-    if (GetFileAttributes(szFileName) == INVALID_FILE_ATTRIBUTES)
-        return m_SharedDesktopFSFolder->QueryInterface(IID_PPV_ARG(IShellFolder2, psf));
-    else
-        return m_DesktopFSFolder->QueryInterface(IID_PPV_ARG(IShellFolder2, psf));
+#if DBG
+    if (_ILIsDesktop(pidl))
+    {
+        FIXME("Desktop is unexpected here!\n");
+    }
+    else if (_ILIsSpecialFolder(pidl))
+    {
+        FIXME("Unexpected PIDL type %#x\n", pidl->mkid.abID[0]);
+    }
+#endif
+    IShellFolder *pSF = IsCommonItem(pidl) ? m_SharedDesktopFSFolder : m_DesktopFSFolder;
+    return pSF->QueryInterface(IID_PPV_ARG(IShellFolder2, psf));
 }
 
 HRESULT CDesktopFolder::_ParseDisplayNameByParent(
@@ -580,6 +523,8 @@ HRESULT WINAPI CDesktopFolder::ParseDisplayName(
                                                        pchEaten,
                                                        ppidl,
                                                        pdwAttributes);
+        if (SUCCEEDED(hr))
+            MarkAsCommonItem(*ppidl);
     }
 
     if (FAILED(hr) && bCreate && m_DesktopFSFolder)
@@ -621,7 +566,8 @@ HRESULT WINAPI CDesktopFolder::EnumObjects(HWND hwndOwner, DWORD dwFlags, LPENUM
     if (FAILED(hr))
         ERR("EnumObjects for shared desktop fs folder failed\n");
 
-    return ShellObjectCreatorInit<CDesktopFolderEnum>(dwFlags,pRegEnumerator, pDesktopEnumerator, pCommonDesktopEnumerator, IID_PPV_ARG(IEnumIDList, ppEnumIDList));
+    return ShellObjectCreatorInit<CDesktopFolderEnum>(m_regFolder, dwFlags, pRegEnumerator, pDesktopEnumerator,
+                                                      pCommonDesktopEnumerator, IID_PPV_ARG(IEnumIDList, ppEnumIDList));
 }
 
 /**************************************************************************
@@ -681,7 +627,10 @@ HRESULT WINAPI CDesktopFolder::CompareIDs(LPARAM lParam, PCUIDLIST_RELATIVE pidl
     if (_ILIsSpecialFolder(pidl1) || _ILIsSpecialFolder(pidl2))
         return m_regFolder->CompareIDs(lParam, pidl1, pidl2);
 
-    return m_DesktopFSFolder->CompareIDs(lParam, pidl1, pidl2);
+    HRESULT ret = m_DesktopFSFolder->CompareIDs(lParam, pidl1, pidl2);
+    if (ret == 0 && ((lParam & SHCIDS_COLUMNMASK) == SHFSF_COL_NAME || (lParam & (SHCIDS_ALLFIELDS | SHCIDS_CANONICALONLY))))
+        ret = MAKE_COMPARE_HRESULT(IsCommonItem(pidl1) - IsCommonItem(pidl2));
+    return ret;
 }
 
 /**************************************************************************
@@ -708,26 +657,21 @@ HRESULT WINAPI CDesktopFolder::CreateViewObject(
     }
     else if (IsEqualIID (riid, IID_IContextMenu))
     {
-            HKEY hKeys[16];
-            UINT cKeys = 0;
-            AddClassKeyToArray(L"Directory\\Background", hKeys, &cKeys);
-
-            DEFCONTEXTMENU dcm;
-            dcm.hwnd = hwndOwner;
-            dcm.pcmcb = this;
-            dcm.pidlFolder = pidlRoot;
-            dcm.psf = this;
-            dcm.cidl = 0;
-            dcm.apidl = NULL;
-            dcm.cKeys = cKeys;
-            dcm.aKeys = hKeys;
-            dcm.punkAssociationInfo = NULL;
-            hr = SHCreateDefaultContextMenu (&dcm, riid, ppvOut);
+        CRegKeyHandleArray keys;
+        AddClassKeyToArray(L"Directory\\Background", keys, keys);
+        DEFCONTEXTMENU dcm = { hwndOwner, this, pidlRoot, this, 0, NULL, NULL, keys, keys };
+        hr = SHCreateDefaultContextMenu(&dcm, riid, ppvOut);
     }
     else if (IsEqualIID (riid, IID_IShellView))
     {
-        SFV_CREATE sfvparams = {sizeof(SFV_CREATE), this};
-        hr = SHCreateShellFolderView(&sfvparams, (IShellView**)ppvOut);
+        CComPtr<CDesktopFolderViewCB> sfviewcb;
+        if (SUCCEEDED(hr = ShellObjectCreator(sfviewcb)))
+        {
+            SFV_CREATE create = { sizeof(create), this, NULL, sfviewcb };
+            hr = SHCreateShellFolderView(&create, (IShellView**)ppvOut);
+            if (SUCCEEDED(hr))
+                sfviewcb->Initialize((IShellView*)*ppvOut);
+        }
     }
     TRACE ("-- (%p)->(interface=%p)\n", this, ppvOut);
     return hr;
@@ -759,14 +703,14 @@ HRESULT WINAPI CDesktopFolder::GetAttributesOf(
         /* TODO: always add SFGAO_CANLINK */
         for (UINT i = 0; i < cidl; ++i)
         {
-            pdump(*apidl);
-            if (_ILIsDesktop(*apidl))
+            pdump(apidl[i]);
+            if (_ILIsDesktop(apidl[i]))
                 *rgfInOut &= dwDesktopAttributes;
             else if (_ILIsMyComputer(apidl[i]))
                 *rgfInOut &= dwMyComputerAttributes;
-            else if (_ILIsNetHood(apidl[i]))
+            else if (IsRegItem(apidl[i], CLSID_NetworkPlaces))
                 *rgfInOut &= dwMyNetPlacesAttributes;
-            else if (_ILIsFolder(apidl[i]) || _ILIsValue(apidl[i]) || _ILIsSpecialFolder(apidl[i]))
+            else if (_ILIsFolderOrFile(apidl[i]) || _ILIsSpecialFolder(apidl[i]))
             {
                 CComPtr<IShellFolder2> psf;
                 HRESULT hr = _GetSFFromPidl(apidl[i], &psf);
@@ -840,29 +784,19 @@ HRESULT WINAPI CDesktopFolder::GetUIObjectOf(
             /* Do not use the context menu of the CFSFolder here. */
             /* We need to pass a pointer of the CDesktopFolder so as the data object that the context menu gets is rooted to the desktop */
             /* Otherwise operations like that involve items from both user and shared desktop will not work */
-            HKEY hKeys[16];
-            UINT cKeys = 0;
+            CRegKeyHandleArray keys;
             if (self)
             {
-                AddClsidKeyToArray(CLSID_ShellDesktop, hKeys, &cKeys);
-                AddClassKeyToArray(L"Folder", hKeys, &cKeys);
+                AddClsidKeyToArray(CLSID_ShellDesktop, keys, keys);
+                AddClassKeyToArray(L"Folder", keys, keys);
             }
             else if (cidl > 0)
             {
-                AddFSClassKeysToArray(cidl, apidl, hKeys, &cKeys);
+                AddFSClassKeysToArray(cidl, apidl, keys, keys);
             }
 
-            DEFCONTEXTMENU dcm;
-            dcm.hwnd = hwndOwner;
-            dcm.pcmcb = this;
-            dcm.pidlFolder = pidlRoot;
-            dcm.psf = this;
-            dcm.cidl = cidl;
-            dcm.apidl = apidl;
-            dcm.cKeys = cKeys;
-            dcm.aKeys = hKeys;
-            dcm.punkAssociationInfo = NULL;
-            hr = SHCreateDefaultContextMenu (&dcm, riid, &pObj);
+            DEFCONTEXTMENU dcm = { hwndOwner, this, pidlRoot, this, cidl, apidl, NULL, keys, keys };
+            hr = SHCreateDefaultContextMenu(&dcm, riid, &pObj);
         }
     }
     else if (IsEqualIID (riid, IID_IDataObject) && (cidl >= 1))
@@ -1000,14 +934,14 @@ HRESULT WINAPI CDesktopFolder::GetDefaultColumnState(UINT iColumn, SHCOLSTATEF *
     return hr;
 }
 
-HRESULT WINAPI CDesktopFolder::GetDetailsEx(
-    PCUITEMID_CHILD pidl,
-    const SHCOLUMNID *pscid,
-    VARIANT *pv)
+HRESULT WINAPI CDesktopFolder::GetDetailsEx(PCUITEMID_CHILD pidl,
+                                            const SHCOLUMNID *pscid, VARIANT *pv)
 {
-    FIXME ("(%p)\n", this);
-
-    return E_NOTIMPL;
+    HRESULT hr;
+    CComPtr<IShellFolder2> psf;
+    if (FAILED_UNEXPECTEDLY(hr = _GetSFFromPidl(pidl, &psf)))
+        return hr;
+    return psf->GetDetailsEx(pidl, pscid, pv);
 }
 
 /*************************************************************************
@@ -1047,8 +981,14 @@ HRESULT WINAPI CDesktopFolder::GetDetailsOf(
 
 HRESULT WINAPI CDesktopFolder::MapColumnToSCID(UINT column, SHCOLUMNID *pscid)
 {
-    FIXME ("(%p)\n", this);
-    return E_NOTIMPL;
+    // Note: All these folders use the same SHFSF_COL mapping (m_regFolder only handles a subset).
+    if (m_DesktopFSFolder)
+        return m_DesktopFSFolder->MapColumnToSCID(column, pscid);
+    if (m_SharedDesktopFSFolder)
+        return m_SharedDesktopFSFolder->MapColumnToSCID(column, pscid);
+    if (m_regFolder)
+        return m_regFolder->MapColumnToSCID(column, pscid);
+    return E_FAIL;
 }
 
 HRESULT WINAPI CDesktopFolder::GetClassID(CLSID *lpClassId)
@@ -1088,7 +1028,15 @@ HRESULT WINAPI CDesktopFolder::CallBack(IShellFolder *psf, HWND hwndOwner, IData
     enum { IDC_PROPERTIES };
     if (uMsg == DFM_INVOKECOMMAND && wParam == (pdtobj ? DFM_CMD_PROPERTIES : IDC_PROPERTIES))
     {
-        return SHELL_ExecuteControlPanelCPL(hwndOwner, L"desk.cpl") ? S_OK : E_FAIL;
+        if (pdtobj)
+        {
+            PIDLIST_ABSOLUTE pidl = SHELL_DataObject_ILCloneFullItem(pdtobj, 0);
+            BOOL bIsSelf = _ILIsDesktop(pidl); // Context menu on Desktop item in the shell tree?
+            ILFree(pidl);
+            if (!bIsSelf)
+                return SHELL32_ShowPropertiesDialog(pdtobj); // File selection
+        }
+        return SHELL_ExecuteControlPanelCPL(hwndOwner, L"desk.cpl") ? S_OK : E_FAIL; // Background
     }
     else if (uMsg == DFM_MERGECONTEXTMENU && !pdtobj) // Add Properties item when called for directory background
     {
@@ -1100,6 +1048,55 @@ HRESULT WINAPI CDesktopFolder::CallBack(IShellFolder *psf, HWND hwndOwner, IData
         return S_OK;
     }
     return SHELL32_DefaultContextMenuCallBack(psf, pdtobj, uMsg);
+}
+
+/*************************************************************************
+ * CDesktopFolderViewCB
+ */
+
+bool CDesktopFolderViewCB::IsProgmanHostedBrowser(IShellView *psv)
+{
+    FOLDERSETTINGS settings;
+    return SUCCEEDED(psv->GetCurrentInfo(&settings)) && (settings.fFlags & FWF_DESKTOP);
+}
+
+bool CDesktopFolderViewCB::IsProgmanHostedBrowser()
+{
+    enum { Uninitialized = 0, NotHosted, IsHosted };
+    C_ASSERT(Uninitialized == 0);
+    if (m_IsProgmanHosted == Uninitialized)
+        m_IsProgmanHosted = m_pShellView && IsProgmanHostedBrowser(m_pShellView) ? IsHosted : NotHosted;
+    return m_IsProgmanHosted == IsHosted;
+}
+
+HRESULT WINAPI CDesktopFolderViewCB::ShouldShow(IShellFolder *psf, PCIDLIST_ABSOLUTE pidlFolder, PCUITEMID_CHILD pidlItem)
+{
+    const CLSID* pClsid;
+    if (IsProgmanHostedBrowser() && (pClsid = IsRegItem(pidlItem)) != NULL)
+    {
+        const BOOL NewStart = SHELL_GetSetting(SSF_STARTPANELON, fStartPanelOn);
+        LPCWSTR SubKey = NewStart ? L"HideDesktopIcons\\NewStartPanel" : L"HideDesktopIcons\\ClassicStartMenu";
+        return SHELL32_IsShellFolderNamespaceItemHidden(SubKey, *pClsid) ? S_FALSE : S_OK;
+    }
+    return S_OK;
+}
+
+HRESULT WINAPI CDesktopFolderViewCB::MessageSFVCB(UINT uMsg, WPARAM wParam, LPARAM lParam)
+{
+    switch (uMsg)
+    {
+        case SFVM_VIEWRELEASE:
+            m_pShellView = NULL;
+            return S_OK;
+        case SFVM_GETCOMMANDDIR:
+        {
+            WCHAR buf[MAX_PATH];
+            if (SHGetSpecialFolderPathW(NULL, buf, CSIDL_DESKTOPDIRECTORY, TRUE))
+                return StringCchCopyW((PWSTR)lParam, wParam, buf);
+            break;
+        }
+    }
+    return E_NOTIMPL;
 }
 
 /*************************************************************************

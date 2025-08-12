@@ -60,7 +60,7 @@ of this change is that a mapping of a small files takes a bit more than 1/4
 of the size in nonpaged kernel space as it did previously.
 
 When we need other threads that may be competing for the same page fault to
-wait, we have a mechanism seperate from PageOps for dealing with that, which
+wait, we have a mechanism separate from PageOps for dealing with that, which
 was suggested by Travis Geiselbrecht after a conversation I had with Alex
 Ionescu.  That mechanism is the MM_WAIT_ENTRY, which is the all-ones SWAPENTRY.
 
@@ -720,7 +720,7 @@ MmUnmapViewOfCacheSegment(PMMSUPPORT AddressSpace,
     PMM_SECTION_SEGMENT Segment;
 
     MemoryArea = MmLocateMemoryAreaByAddress(AddressSpace, BaseAddress);
-    if (MemoryArea == NULL || MemoryArea->DeleteInProgress)
+    if (MemoryArea == NULL || MemoryArea->Type == MEMORY_AREA_OWNED_BY_ARM3 || MemoryArea->DeleteInProgress)
     {
         ASSERT(MemoryArea);
         return STATUS_UNSUCCESSFUL;

@@ -15,7 +15,7 @@ jobs:
           - dllver: 0x600
             config: Release
       fail-fast: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
     - name: Get RosBE build specifics
       id: get_rosbe_spec
@@ -165,6 +165,7 @@ jobs:
       uses: ilammy/msvc-dev-cmd@v1
       with:
         arch: amd64_arm
+        sdk: 10.0.22621.0   # Windows SDK 10.0.26100.0 dropped support for 32-bit ARM
         toolset: ${{matrix.toolset}}
     - name: Activate VS cmd (arm64)
       if: ${{ matrix.arch == 'arm64' }}
@@ -181,9 +182,21 @@ jobs:
     - name: Build base module
       if: ${{ matrix.arch == 'arm' }}
       run: cmake --build build --target base/all
+    - name: Build dll:3rdparty
+      if: ${{ matrix.arch == 'arm' }}
+      run: cmake --build build --target dll/3rdparty/all -- -k0
     - name: Build control panel applets
       if: ${{ matrix.arch == 'arm' }}
       run: cmake --build build --target dll/cpl/all
+    - name: Build dll:opengl
+      if: ${{ matrix.arch == 'arm' }}
+      run: cmake --build build --target dll/opengl/all -- -k0
+    - name: Build dll:shellext
+      if: ${{ matrix.arch == 'arm' }}
+      run: cmake --build build --target dll/shellext/all -- -k0
+    - name: Build drivers:base
+      if: ${{ matrix.arch == 'arm' }}
+      run: cmake --build build --target drivers/base/all -- -k0
     - name: Build rosapps
       if: ${{ matrix.arch == 'arm' }}
       run: cmake --build build --target modules/rosapps/all
@@ -193,13 +206,20 @@ jobs:
     - name: Build some applications (arm64)
       if: ${{ matrix.arch == 'arm64' }}
       run: cmake --build build --target calc magnify mstsc notepad osk regedit taskmgr winmine wordpad base/applications/screensavers/all -- -k0
+    - name: Build control panel applets (arm64)
+      if: ${{ matrix.arch == 'arm64' }}
+      run: cmake --build build --target dll/cpl/all -- -k0
     - name: Upload compiled binaries
       uses: actions/upload-artifact@v4
       with:
         name: reactos-msvc${{matrix.toolset}}-${{matrix.arch}}-${{matrix.config}}-${{github.sha}}
         path: |
           build/base
+          build/dll/3rdparty
           build/dll/cpl
+          build/dll/opengl
+          build/dll/shellext
+          build/drivers/base
           build/modules/rosapps
           build/subsystems
           !**/CMakeFiles

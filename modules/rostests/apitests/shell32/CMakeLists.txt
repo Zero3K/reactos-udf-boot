@@ -2,7 +2,6 @@
 spec2def(shell32_apitest.exe shell32_apitest.spec)
 
 list(APPEND SOURCE
-    closewnd.cpp
     AddCommas.cpp
     CFSFolder.cpp
     CheckEscapes.cpp
@@ -24,6 +23,8 @@ list(APPEND SOURCE
     OpenAs_RunDLL.cpp
     PathIsEqualOrSubFolder.cpp
     PathIsTemporary.cpp
+    PathMakeUniqueName.cpp
+    PathProcessCommand.cpp
     PathResolve.cpp
     RealShellExecuteEx.cpp
     SHAppBarMessage.cpp
@@ -31,16 +32,26 @@ list(APPEND SOURCE
     SHCreateDataObject.cpp
     SHCreateFileDataObject.cpp
     SHCreateFileExtractIconW.cpp
+    SHGetComputerDisplayNameW.cpp
+    SHGetUnreadMailCountW.cpp
+    SHIsBadInterfacePtr.cpp
     SHParseDisplayName.cpp
     SHRestricted.cpp
+    SHShouldShowWizards.cpp
+    SHEnumerateUnreadMailAccountsW.cpp
     She.cpp
+    ShellExec_RunDLL.cpp
     ShellExecCmdLine.cpp
     ShellExecuteEx.cpp
     ShellExecuteW.cpp
     ShellHook.cpp
+    ShellInfo.cpp
     ShellState.cpp
     SHGetAttributesFromDataObject.cpp
+    SHGetUserDisplayName.cpp
     SHLimitInputEdit.cpp
+    SHSetUnreadMailCountW.cpp
+    StrRStr.cpp
     menu.cpp
     shelltest.cpp)
 
@@ -71,3 +82,4 @@ target_link_libraries(shell32_apitest_sub cpprt atl_classes)
 set_module_type(shell32_apitest_sub win32gui UNICODE)
 add_importlibs(shell32_apitest_sub msvcrt kernel32 user32 shell32 shlwapi ole32)
 add_rostests_file(TARGET shell32_apitest_sub SUBDIR testdata)
+add_dependencies(shell32_apitest shell32_apitest_sub)

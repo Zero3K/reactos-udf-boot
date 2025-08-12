@@ -274,7 +274,7 @@ BEGIN
     BEGIN
         MENUITEM "Geräte nach &Typ",               IDM_DEVBYTYPE
         MENUITEM "Garäte nach &Verbindung",        IDM_DEVBYCONN
-        MENUITEM "Ressourcen nac&h Typ",           IDM_RESBYTYPE, GRAYED
+        MENUITEM "Ressourcen nac&h Typ",           IDM_RESBYTYPE
         MENUITEM "Ressourcen nach V&erbindung",    IDM_RESBYCONN, GRAYED
         MENUITEM SEPARATOR
         MENUITEM "Ausgeblendete &Geräte anzeigen", IDM_SHOWHIDDEN
@@ -286,14 +286,15 @@ BEGIN
 END
 
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_APPNAME               "ReactOS Geräte-Manager"
   IDS_APP_AUTHORS           "Copyright 2015 Ged Murphy"
   IDS_CONFIRM_DISABLE       "Dieses Gerät zu deaktivieren wird dessen Funktion einstellen.\nWollen Sie es wirklich deaktivieren?"
   IDS_CONFIRM_UNINSTALL     "Warnung: Sie sind dabei, dieses Gerät deinstallieren\nMöchten Sie den Vorgang fortsetzen?"
 END
-STRINGTABLE DISCARDABLE
+
+STRINGTABLE
 BEGIN
   IDS_MENU_UPDATE           "Treibersoftware aktualisieren ..."
   IDS_MENU_ENABLE           "Aktivieren"
@@ -304,7 +305,7 @@ BEGIN
   IDS_MENU_PROPERTIES       "Eigenschaften"
 END
 
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_TOOLTIP_PROPERTIES    "Eigenschaften"
   IDS_TOOLTIP_SCAN          "Nach geänderter Hardware suchen"
@@ -314,8 +315,16 @@ BEGIN
   IDS_TOOLTIP_UNINSTALL     "Deinstallieren"
 END
 
+STRINGTABLE
+BEGIN
+  IDS_TYPE_MEMORY           "Arbeitsspeicher"
+  IDS_TYPE_PORT             "Ein-/Ausgabe (E/A)"
+  IDS_TYPE_DMA              "Direkter Speicherzugriff (DMA)"
+  IDS_TYPE_IRQ              "Interruptanfrage (IRQ)"
+END
+
 /* Hints */
-STRINGTABLE DISCARDABLE
+STRINGTABLE
 BEGIN
   IDS_HINT_BLANK        " "
   IDS_HINT_PROPERTIES   " Öffnet Eigenschaftsdialog für die aktuelle Auswahl."

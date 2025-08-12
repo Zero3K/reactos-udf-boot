@@ -18,10 +18,12 @@
 #include <winreg.h>
 #include <winuser.h>
 #include <netevent.h>
+
 #define NTOS_MODE_USER
 #include <ndk/setypes.h>
 #include <ndk/obfuncs.h>
 #include <ndk/rtlfuncs.h>
+
 #include <services/services.h>
 #include <svcctl_s.h>
 
@@ -65,7 +67,7 @@ typedef struct _SERVICE
     PSERVICE_IMAGE lpImage;
     BOOL bDeleted;
     DWORD dwResumeCount;
-    DWORD dwRefCount;
+    LONG RefCount;
 
     SERVICE_STATUS Status;
     DWORD dwStartType;
@@ -137,8 +139,8 @@ ScmReadDependencies(HKEY hServiceKey,
 
 DWORD
 ScmSetServicePassword(
-    IN PCWSTR pszServiceName,
-    IN PCWSTR pszPassword);
+    _In_ PCWSTR pszServiceName,
+    _In_ PCWSTR pszPassword);
 
 DWORD
 ScmWriteSecurityDescriptor(
@@ -184,7 +186,10 @@ VOID ScmAutoStartServices(VOID);
 VOID ScmAutoShutdownServices(VOID);
 DWORD ScmStartService(PSERVICE Service,
                       DWORD argc,
-                      LPWSTR *argv);
+                      const PCWSTR* argv);
+
+DWORD ScmReferenceService(PSERVICE lpService);
+DWORD ScmDereferenceService(PSERVICE lpService);
 
 VOID ScmRemoveServiceImage(PSERVICE_IMAGE pServiceImage);
 PSERVICE ScmGetServiceEntryByName(LPCWSTR lpServiceName);
@@ -197,10 +202,30 @@ DWORD ScmCreateNewServiceRecord(LPCWSTR lpServiceName,
 VOID ScmDeleteServiceRecord(PSERVICE lpService);
 DWORD ScmMarkServiceForDelete(PSERVICE pService);
 
-DWORD ScmControlService(HANDLE hControlPipe,
-                        PWSTR pServiceName,
-                        SERVICE_STATUS_HANDLE hServiceStatus,
-                        DWORD dwControl);
+DWORD
+ScmSendControlPacket(
+    _In_ HANDLE hControlPipe,
+    _In_ PCWSTR pServiceName,
+    _In_ DWORD dwControl,
+    _In_ DWORD dwControlpacketSize,
+    _In_ PVOID pControlPacket);
+
+DWORD
+ScmControlServiceEx(
+    _In_ HANDLE hControlPipe,
+    _In_ PCWSTR pServiceName,
+    _In_ DWORD dwControl,
+    _In_ SERVICE_STATUS_HANDLE hServiceStatus,
+    _In_opt_ DWORD dwServiceTag,
+    _In_opt_ DWORD argc,
+    _In_reads_opt_(argc) const PCWSTR* argv);
+
+DWORD
+ScmControlService(
+    _In_ HANDLE hControlPipe,
+    _In_ PCWSTR pServiceName,
+    _In_ DWORD dwControl,
+    _In_ SERVICE_STATUS_HANDLE hServiceStatus);
 
 BOOL ScmLockDatabaseExclusive(VOID);
 BOOL ScmLockDatabaseShared(VOID);

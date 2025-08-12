@@ -101,6 +101,38 @@ static bool CLSIDPrefix(T& String, CLSID& Clsid)
     return false;
 }
 
+struct CLoggingServiceProvider : public IServiceProvider
+{
+    HRESULT WINAPI QueryInterface(REFIID riid, void **ppv) override
+    {
+        static const QITAB c_tab[] =
+        {
+            QITABENT(CLoggingServiceProvider, IServiceProvider),
+            { NULL }
+        };
+        return ::QISearch(this, c_tab, riid, ppv);
+    }
+    ULONG WINAPI AddRef() override { return 1; }
+    ULONG WINAPI Release() override { return 1; }
+
+    HRESULT WINAPI QueryService(REFGUID rcls, REFIID riid, void **ppv) override
+    {
+        WCHAR szCls[42], szIid[42];
+        wprintf(L"INFO: QS %ls:%ls\n",
+                StringFromGUID2(rcls, szCls, _countof(szCls)) ? szCls : L"?",
+                StringFromGUID2(riid, szIid, _countof(szIid)) ? szIid : L"?");
+        if (ppv)
+            *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+};
+
+static IServiceProvider* GetLoggingServiceProvider()
+{
+    static CLoggingServiceProvider g_SP;
+    return &g_SP;
+}
+
 static HRESULT GetUIObjectOfAbsolute(LPCITEMIDLIST pidl, REFIID riid, void** ppv)
 {
     CComPtr<IShellFolder> shellFolder;
@@ -314,15 +346,15 @@ static HRESULT AssocQ(int argc, WCHAR **argv)
         return ErrMsg(hr);
 
     DWORD size = maxSize;
-    if (!wcsicmp(argv[1], L"string"))
+    if (!_wcsicmp(argv[1], L"string"))
     {
-        if (!wcsicmp(argv[2], L"COMMAND"))
+        if (!_wcsicmp(argv[2], L"COMMAND"))
             qtype = ASSOCSTR_COMMAND;
-        if (!wcsicmp(argv[2], L"EXECUTABLE"))
+        if (!_wcsicmp(argv[2], L"EXECUTABLE"))
             qtype = ASSOCSTR_EXECUTABLE;
-        if (!wcsicmp(argv[2], L"FRIENDLYDOCNAME") || !wcsicmp(argv[2], L"FriendlyTypeName"))
+        if (!_wcsicmp(argv[2], L"FRIENDLYDOCNAME") || !_wcsicmp(argv[2], L"FriendlyTypeName"))
             qtype = ASSOCSTR_FRIENDLYDOCNAME;
-        if (!wcsicmp(argv[2], L"DEFAULTICON"))
+        if (!_wcsicmp(argv[2], L"DEFAULTICON"))
             qtype = ASSOCSTR_DEFAULTICON;
 
         buf[0] = UNICODE_NULL;
@@ -340,11 +372,11 @@ static HRESULT AssocQ(int argc, WCHAR **argv)
             ErrMsg(hr);
         }
     }
-    else if (!wcsicmp(argv[1], L"data"))
+    else if (!_wcsicmp(argv[1], L"data"))
     {
-        if (!wcsicmp(argv[2], L"EDITFLAGS"))
+        if (!_wcsicmp(argv[2], L"EDITFLAGS"))
             qtype = ASSOCDATA_EDITFLAGS;
-        if (!wcsicmp(argv[2], L"VALUE"))
+        if (!_wcsicmp(argv[2], L"VALUE"))
             qtype = ASSOCDATA_VALUE;
 
         hr = qa->GetData(qflags, (ASSOCDATA)qtype, extra, buf, &size);
@@ -359,7 +391,7 @@ static HRESULT AssocQ(int argc, WCHAR **argv)
             ErrMsg(hr);
         }
     }
-    else if (!wcsicmp(argv[1], L"key"))
+    else if (!_wcsicmp(argv[1], L"key"))
     {
         HKEY hKey = NULL;
         hr = qa->GetKey(qflags, (ASSOCKEY)qtype, extra, &hKey);
@@ -632,7 +664,7 @@ static bool isCmdWithArg(int argc, WCHAR** argv, int& n, PCWSTR check, PCWSTR &a
 
 static bool isCmd(int argc, WCHAR** argv, int n, PCWSTR check)
 {
-    return !wcsicmp(argv[n] + 1, check);
+    return !_wcsicmp(argv[n] + 1, check);
 }
 
 extern "C"  // and another hack for gcc
@@ -675,6 +707,10 @@ int wmain(int argc, WCHAR **argv)
                 {
                     if (argv[n][0] != '-' && argv[n][0] != '/')
                         break;
+                    else if (isCmd(argc, argv, n, L"MIN"))
+                        sei.nShow = SW_SHOWMINNOACTIVE;
+                    else if (isCmd(argc, argv, n, L"MAX"))
+                        sei.nShow = SW_SHOWMAXIMIZED;
                     else if (isCmd(argc, argv, n, L"INVOKE"))
                         sei.fMask |= SEE_MASK_INVOKEIDLIST;
                     else if (isCmd(argc, argv, n, L"NOUI"))
@@ -683,6 +719,22 @@ int wmain(int argc, WCHAR **argv)
                         sei.fMask |= SEE_MASK_ASYNCOK ;
                     else if (isCmd(argc, argv, n, L"NOASYNC"))
                         sei.fMask |= SEE_MASK_NOASYNC;
+                    else if (isCmd(argc, argv, n, L"NOCONSOLE"))
+                        sei.fMask |= SEE_MASK_NO_CONSOLE;
+                    else if (isCmd(argc, argv, n, L"1000"))
+                        sei.fMask |= 0x00001000; // Unknown flag
+                    else if (isCmd(argc, argv, n, L"NOHOOKS"))
+                        sei.fMask |= 0x00002000;
+                    else if (isCmd(argc, argv, n, L"SITE"))
+                    {
+                        sei.fMask |= 0x08000000; // SEE_MASK_FLAG_HINST_IS_SITE
+                        sei.hInstApp = (HINSTANCE)GetLoggingServiceProvider();
+                    }
+                    else if (isCmd(argc, argv, n, L"FILL"))
+                    {
+                        sei.hInstApp = (HINSTANCE)UlongToHandle(0xCAFE);
+                        sei.hProcess = UlongToHandle(0xDEADF00D);
+                    }
                     else
                         wprintf(L"WARN: Ignoring switch %s\n", argv[n]);
                 }

@@ -43,31 +43,13 @@ BEGIN
     END
 END
 
-IDR_APPLICATIONMENU MENU
-BEGIN
-    POPUP ""
-    BEGIN
-        MENUITEM "&Installera\tCtrl+Enter", ID_INSTALL
-        MENUITEM "&Avinstallera\tCtrl+Del", ID_UNINSTALL
-        MENUITEM "&Ändra", ID_MODIFY
-        MENUITEM SEPARATOR
-        MENUITEM "Ta bort från R&egistret", ID_REGREMOVE
-        MENUITEM SEPARATOR
-        MENUITEM "Uppdate&ra\tF5", ID_REFRESH
-        MENUITEM SEPARATOR
-        MENUITEM "Update Data&base\tCtrl+F5", ID_RESETDB
-    END
-END
-
 IDD_SETTINGS_DIALOG DIALOGEX 0, 0, 250, 265
 STYLE DS_SHELLFONT | DS_MODALFRAME | WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU
 CAPTION "Inställningar"
 FONT 8, "MS Shell Dlg"
 BEGIN
     GROUPBOX "Allmänna", -1, 4, 2, 240, 61
-    AUTOCHECKBOX "&Spara fönsterposition", IDC_SAVE_WINDOW_POS, 15, 12, 219, 12
-    AUTOCHECKBOX "&Uppdatera listan med tillgängliga program vid start", IDC_UPDATE_AVLIST, 15, 29, 222, 12
-    AUTOCHECKBOX "&Logga ur installation och borttagning program", IDC_LOG_ENABLED, 15, 46, 219, 12
+    CONTROL "", IDC_GENERALLIST, "SysListView32", WS_TABSTOP | LVCHECKSTYLES, 15, 12, 219, 46, WS_EX_STATICEDGE
     GROUPBOX "Nerladding", -1, 4, 65, 240, 51
     LTEXT "Mapp för nerladdningar:", -1, 16, 75, 100, 9
     EDITTEXT IDC_DOWNLOAD_DIR_EDIT, 15, 86, 166, 12, WS_CHILD | WS_VISIBLE | WS_GROUP | ES_AUTOHSCROLL
@@ -188,11 +170,20 @@ STRINGTABLE
 BEGIN
     IDS_APPTITLE "ReactOS programhanterare"
     IDS_APP_AUTHORS "Copyright 2009 Dmitry Chapyshev"
-    IDS_SEARCH_TEXT "Sök…"
-    IDS_APPS_COUNT "Programantal: %d; Selected: %d"
-    IDS_WELCOME_TITLE "Välkommen till ReactOS programhanterare!\n\n"
+    IDS_WELCOME_TITLE "Välkommen till ReactOS programhanterare!"
     IDS_WELCOME_TEXT "Välj en kategori till vänster, och sedan ett program för att installera eller avinstallera.\nReactOS Web sida: "
     IDS_WELCOME_URL "https://reactos.org"
+
+    IDS_APPWIZ_TITLE "Add/Remove Programs"
+    IDS_APPWIZ_TEXT1 "Choose ""Applications"" or ""Updates"" to view the list of applications or updates installed on your system."
+    IDS_APPWIZ_TEXT2 "To remove a program or to modify its installed components, select it from the list and click on ""Uninstall"" or ""Modify""."
+END
+
+STRINGTABLE
+BEGIN
+    IDS_SEARCH_TEXT "Sök…"
+    IDS_APPS_COUNT "Programantal: %d"
+    IDS_APPS_SELECT_COUNT "; Selected: %d"
     IDS_INSTALLED "Installerat"
     IDS_AVAILABLEFORINST "Tillgängliga for installation"
     IDS_UPDATES "Uppdateringar"
@@ -219,6 +210,10 @@ BEGIN
     IDS_APP_DISPLAY_LIST "List"
     IDS_APP_DISPLAY_TILE "Tile"
     IDS_NO_SEARCH_RESULTS "No search results"
+    IDS_CFG_SAVE_WINDOW_POS "Spara fönsterposition"
+    IDS_CFG_UPDATE_AVLIST "Uppdatera listan med tillgängliga program vid start"
+    IDS_CFG_LOG_ENABLED "Logga ur installation och borttagning program"
+    IDS_CFG_SMALL_ICONS "Små ikoner"
 END
 
 STRINGTABLE
@@ -272,4 +267,5 @@ END
 STRINGTABLE
 BEGIN
     IDS_INSTGEN_CONFIRMUNINST "Are you sure you want to uninstall %s?"
+    IDS_INSTGEN_CONFIRMINSTRUNAPP "Installation complete, run %s now?"
 END

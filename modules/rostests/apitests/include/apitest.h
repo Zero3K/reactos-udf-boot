@@ -12,7 +12,10 @@
 #define InvalidPointer ((PVOID)0x5555555555555555ULL)
 // #define InvalidPointer ((PVOID)0x0123456789ABCDEFULL)
 
-#ifdef __USE_PSEH2__
+/* Magic pointers come from KUSER_SHARED_DATA; needed to get true NT version on Windows 8+ */
+#define KUSER_SHARED_DATA_UMPTR 0x7FFE0000
+#define GetNTVersion() (((*(ULONG*)(KUSER_SHARED_DATA_UMPTR + 0x026C)) << 8) | (*(ULONG*)(KUSER_SHARED_DATA_UMPTR + 0x0270)))
+
 #include <pseh/pseh2.h>
 
 #define StartSeh()                                  \
@@ -32,24 +35,6 @@
        "Exception 0x%08lx, expected 0x%08lx\n",     \
        ExceptionStatus, (ExpectedStatus));          \
 }
-#else
-#define StartSeh()                                  \
-{                                                   \
-    NTSTATUS ExceptionStatus = STATUS_SUCCESS;      \
-    __try                                           \
-    {
-
-#define EndSeh(ExpectedStatus)                      \
-    }                                               \
-    __except(EXCEPTION_EXECUTE_HANDLER)             \
-    {                                               \
-        ExceptionStatus = GetExceptionCode();       \
-    }                                               \
-    ok(ExceptionStatus == (ExpectedStatus),         \
-       "Exception 0x%08lx, expected 0x%08lx\n",     \
-       ExceptionStatus, (ExpectedStatus));          \
-}
-#endif
 
 #define ok_hr(status, expected)                 ok_hex(status, expected)
 #define ok_hr_(file, line, status, expected)    ok_hex_(file, line, status, expected)
@@ -74,7 +59,7 @@
 #define ok_eq_longptr(value, expected)      ok_eq_print(value, (LONG_PTR)(expected), "%I64d")
 #define ok_eq_ulongptr(value, expected)     ok_eq_print(value, (ULONG_PTR)(expected), "%I64u")
 #endif /* defined _WIN64 */
-#define ok_eq_hex(value, expected)          ok_eq_print(value, expected, "0x%08lx")
+#define ok_eq_hex(value, expected)          ok_eq_print((unsigned long)value, (unsigned long)expected, "0x%08lx")
 #define ok_bool_true(value, desc)           ok((value) == TRUE, desc " FALSE, expected TRUE\n")
 #define ok_bool_false(value, desc)          ok((value) == FALSE, desc " TRUE, expected FALSE\n")
 #define ok_eq_bool(value, expected)         ok((value) == (expected), #value " = %s, expected %s\n", \
@@ -86,7 +71,7 @@
 
 #define ok_eq_hex_(file, line, value, expected) ok_eq_print_(file, line, value, expected, "0x%08lx")
 #define ok_eq_hex64_(file, line, value, expected) ok_eq_print_(file, line, value, expected, "%I64x")
-#define ok_eq_hex64(value, expected)        ok_eq_print(value, expected, "%I64x")
+#define ok_eq_hex64(value, expected)        ok_eq_print((unsigned long long)value, (unsigned long long)expected, "%I64x")
 #define ok_eq_xmm(value, expected)          ok((value).Low == (expected).Low, #value " = %I64x'%08I64x, expected %I64x'%08I64x\n", (value).Low, (value).High, (expected).Low, (expected).High)
 
 #endif /* _APITEST_H */

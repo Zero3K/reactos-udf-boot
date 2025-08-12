@@ -542,12 +542,6 @@ static inline int textcmpWT(LPCWSTR aw, LPCWSTR bt, BOOL isW)
 	    
     return 1;
 }
-    
-static inline int lstrncmpiW(LPCWSTR s1, LPCWSTR s2, int n)
-{
-    n = min(min(n, lstrlenW(s1)), lstrlenW(s2));
-    return CompareStringW(LOCALE_USER_DEFAULT, NORM_IGNORECASE, s1, n, s2, n) - CSTR_EQUAL;
-}
 
 /******** Debugging functions *****************************************/
 
@@ -1972,7 +1966,7 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
                 item.cchTextMax = MAX_PATH;
                 if (!LISTVIEW_GetItemW(infoPtr, &item)) return 0;
 
-                if (!lstrncmpiW(item.pszText, infoPtr->szSearchParam, infoPtr->nSearchParamLength))
+                if (!wcsnicmp(item.pszText, infoPtr->szSearchParam, infoPtr->nSearchParamLength))
                 {
                     nItem = i;
                     break;
@@ -1980,7 +1974,7 @@ static INT LISTVIEW_ProcessLetterKeys(LISTVIEW_INFO *infoPtr, WPARAM charCode, L
                 /* this is used to find first char match when search string is not available yet,
                    otherwise every WM_CHAR will search to next item by first char, ignoring that we're
                    already waiting for user to complete a string */
-                else if (nItem == -1 && infoPtr->nSearchParamLength == 1 && !lstrncmpiW(item.pszText, infoPtr->szSearchParam, 1))
+                else if (nItem == -1 && infoPtr->nSearchParamLength == 1 && !wcsnicmp(item.pszText, infoPtr->szSearchParam, 1))
                 {
                     /* this would work but we must keep looking for a longer match */
                     nItem = i;
@@ -2276,11 +2270,7 @@ static void LISTVIEW_InvalidateSelectedItems(const LISTVIEW_INFO *infoPtr)
     iterator_frameditems(&i, infoPtr, &infoPtr->rcList); 
     while(iterator_next(&i))
     {
-#ifdef __REACTOS__
-	if (LISTVIEW_GetItemState(infoPtr, i.nItem, LVIS_SELECTED | LVIS_CUT))
-#else
 	if (LISTVIEW_GetItemState(infoPtr, i.nItem, LVIS_SELECTED))
-#endif
 	    LISTVIEW_InvalidateItem(infoPtr, i.nItem);
     }
     iterator_destroy(&i);
@@ -3735,8 +3725,10 @@ static void LISTVIEW_SetGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
     item.state = LVIS_SELECTED; 
     item.stateMask = LVIS_SELECTED;
 
+#ifndef __REACTOS__
     if ((infoPtr->uView == LV_VIEW_LIST) || (infoPtr->uView == LV_VIEW_DETAILS))
     {
+#endif
 	if (infoPtr->nSelectionMark == -1)
 	{
 	    infoPtr->nSelectionMark = nItem;
@@ -3750,6 +3742,7 @@ static void LISTVIEW_SetGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
 	    sel.upper = max(infoPtr->nSelectionMark, nItem) + 1;
 	    ranges_add(selection, sel);
 	}
+#ifndef __REACTOS__
     }
     else
     {
@@ -3775,6 +3768,7 @@ static void LISTVIEW_SetGroupSelection(LISTVIEW_INFO *infoPtr, INT nItem)
 	}
 	iterator_destroy(&i);
     }
+#endif
 
     /* disable per item notifications on LVS_OWNERDATA style
        FIXME: single LVN_ODSTATECHANGED should be used */
@@ -4788,7 +4782,11 @@ static void LISTVIEW_DrawItemPart(LISTVIEW_INFO *infoPtr, LVITEMW *item, const N
 
         TRACE("iImage=%d\n", item->iImage);
 
+#ifdef __REACTOS__
+        if (item->state & (LVIS_CUT | (infoPtr->bFocus ? LVIS_SELECTED : 0)))
+#else
         if (item->state & (LVIS_SELECTED | LVIS_CUT) && infoPtr->bFocus)
+#endif
             style = ILD_SELECTED;
         else
             style = ILD_NORMAL;
@@ -6797,11 +6795,11 @@ static HIMAGELIST LISTVIEW_GetImageList(const LISTVIEW_INFO *infoPtr, INT nImage
 static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, BOOL isW)
 {
     ITEMHDR callbackHdr = { LPSTR_TEXTCALLBACKW, I_IMAGECALLBACK };
+    BOOL is_subitem_invalid = FALSE;
     NMLVDISPINFOW dispInfo;
     ITEM_INFO *lpItem;
     ITEMHDR* pItemHdr;
     HDPA hdpaSubItems;
-    INT isubitem;
 
     TRACE("(item=%s, isW=%d)\n", debuglvitem_t(lpLVItem, isW), isW);
 
@@ -6811,10 +6809,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
     if (lpLVItem->mask == 0) return TRUE;
     TRACE("mask=%x\n", lpLVItem->mask);
 
-    /* make a local copy */
-    isubitem = lpLVItem->iSubItem;
-
-    if (isubitem && (lpLVItem->mask & LVIF_STATE))
+    if (lpLVItem->iSubItem && (lpLVItem->mask & LVIF_STATE))
         lpLVItem->state = 0;
 
     /* a quick optimization if all we're asked is the focus state
@@ -6824,7 +6819,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 	 !(infoPtr->uCallbackMask & LVIS_FOCUSED) )
     {
         lpLVItem->state = 0;
-        if (infoPtr->nFocusedItem == lpLVItem->iItem && isubitem == 0)
+        if (infoPtr->nFocusedItem == lpLVItem->iItem && !lpLVItem->iSubItem)
             lpLVItem->state |= LVIS_FOCUSED;
         return TRUE;
     }
@@ -6846,7 +6841,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 	     *       depend on the uninitialized fields being 0 */
 	    dispInfo.item.mask = lpLVItem->mask & ~LVIF_PARAM;
 	    dispInfo.item.iItem = lpLVItem->iItem;
-	    dispInfo.item.iSubItem = isubitem;
+	    dispInfo.item.iSubItem = lpLVItem->iSubItem;
 	    if (lpLVItem->mask & LVIF_TEXT)
 	    {
 		if (lpLVItem->mask & LVIF_NORECOMPUTE)
@@ -6893,7 +6888,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 	    lpLVItem->pszText = LPSTR_TEXTCALLBACKW;
 
 	/* we store only a little state, so if we're not asked, we're done */
-	if (!(lpLVItem->mask & LVIF_STATE) || isubitem) return TRUE;
+	if (!(lpLVItem->mask & LVIF_STATE) || lpLVItem->iSubItem) return TRUE;
 
 	/* if focus is handled by us, report it */
 	if ( lpLVItem->stateMask & ~infoPtr->uCallbackMask & LVIS_FOCUSED ) 
@@ -6919,21 +6914,22 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
     lpItem = DPA_GetPtr(hdpaSubItems, 0);
     assert (lpItem);
 
-    if (isubitem)
+    if (lpLVItem->iSubItem)
     {
-        SUBITEM_INFO *lpSubItem = LISTVIEW_GetSubItemPtr(hdpaSubItems, isubitem);
-        pItemHdr = lpSubItem ? &lpSubItem->hdr : &callbackHdr;
-        if (!lpSubItem)
+        SUBITEM_INFO *lpSubItem = LISTVIEW_GetSubItemPtr(hdpaSubItems, lpLVItem->iSubItem);
+        if (lpSubItem)
+            pItemHdr = &lpSubItem->hdr;
+        else
         {
-            WARN(" iSubItem invalid (%08x), ignored.\n", isubitem);
-            isubitem = 0;
+            pItemHdr = &callbackHdr;
+            is_subitem_invalid = TRUE;
         }
     }
     else
 	pItemHdr = &lpItem->hdr;
 
     /* Do we need to query the state from the app? */
-    if ((lpLVItem->mask & LVIF_STATE) && infoPtr->uCallbackMask && isubitem == 0)
+    if ((lpLVItem->mask & LVIF_STATE) && infoPtr->uCallbackMask && (!lpLVItem->iSubItem || is_subitem_invalid))
     {
 	dispInfo.item.mask |= LVIF_STATE;
 	dispInfo.item.stateMask = infoPtr->uCallbackMask;
@@ -6941,15 +6937,14 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
   
     /* Do we need to enquire about the image? */
     if ((lpLVItem->mask & LVIF_IMAGE) && pItemHdr->iImage == I_IMAGECALLBACK &&
-        (isubitem == 0 || (infoPtr->dwLvExStyle & LVS_EX_SUBITEMIMAGES)))
+        (!lpLVItem->iSubItem || (infoPtr->dwLvExStyle & LVS_EX_SUBITEMIMAGES)))
     {
 	dispInfo.item.mask |= LVIF_IMAGE;
         dispInfo.item.iImage = I_IMAGECALLBACK;
     }
 
     /* Only items support indentation */
-    if ((lpLVItem->mask & LVIF_INDENT) && lpItem->iIndent == I_INDENTCALLBACK &&
-        (isubitem == 0))
+    if ((lpLVItem->mask & LVIF_INDENT) && lpItem->iIndent == I_INDENTCALLBACK && !lpLVItem->iSubItem)
     {
         dispInfo.item.mask |= LVIF_INDENT;
         dispInfo.item.iIndent = I_INDENTCALLBACK;
@@ -6970,14 +6965,14 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
     if (dispInfo.item.mask)
     {
 	dispInfo.item.iItem = lpLVItem->iItem;
-	dispInfo.item.iSubItem = lpLVItem->iSubItem; /* yes: the original subitem */
+	dispInfo.item.iSubItem = lpLVItem->iSubItem;
 	dispInfo.item.lParam = lpItem->lParam;
 	notify_dispinfoT(infoPtr, LVN_GETDISPINFOW, &dispInfo, isW);
 	TRACE("   getdispinfo(2):item=%s\n", debuglvitem_t(&dispInfo.item, isW));
     }
 
     /* we should not store values for subitems */
-    if (isubitem) dispInfo.item.mask &= ~LVIF_DI_SETITEM;
+    if (lpLVItem->iSubItem) dispInfo.item.mask &= ~LVIF_DI_SETITEM;
 
     /* Now, handle the iImage field */
     if (dispInfo.item.mask & LVIF_IMAGE)
@@ -6988,7 +6983,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
     }
     else if (lpLVItem->mask & LVIF_IMAGE)
     {
-        if(isubitem == 0 || (infoPtr->dwLvExStyle & LVS_EX_SUBITEMIMAGES))
+        if (!lpLVItem->iSubItem || (infoPtr->dwLvExStyle & LVS_EX_SUBITEMIMAGES))
             lpLVItem->iImage = pItemHdr->iImage;
         else
             lpLVItem->iImage = 0;
@@ -7020,7 +7015,7 @@ static BOOL LISTVIEW_GetItemT(const LISTVIEW_INFO *infoPtr, LPLVITEMW lpLVItem, 
 	lpLVItem->lParam = lpItem->lParam;
 
     /* if this is a subitem, we're done */
-    if (isubitem) return TRUE;
+    if (lpLVItem->iSubItem) return TRUE;
 
     /* ... the state field (this one is different due to uCallbackmask) */
     if (lpLVItem->mask & LVIF_STATE)
@@ -8561,8 +8556,13 @@ static BOOL LISTVIEW_SetColumnWidth(LISTVIEW_INFO *infoPtr, INT nColumn, INT cx)
 	if (infoPtr->himlSmall && (nColumn == 0 || (LISTVIEW_GetColumnInfo(infoPtr, nColumn)->fmt & LVCFMT_IMAGE)))
 	    max_cx += infoPtr->iconSize.cx;
 	max_cx += TRAILING_LABEL_PADDING;
+#ifdef __REACTOS__
+        if (nColumn == 0 && infoPtr->himlState)
+            max_cx += infoPtr->iconStateSize.cx;
+#else
         if (nColumn == 0 && (infoPtr->dwLvExStyle & LVS_EX_CHECKBOXES))
             max_cx += GetSystemMetrics(SM_CXSMICON);
+#endif
     }
 
     /* autosize based on listview items width */
@@ -12006,7 +12006,42 @@ LISTVIEW_WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
       }
       return DefWindowProcW(hwnd, uMsg, wParam, lParam);
 
+#ifdef __REACTOS__
+  case WM_SETTINGCHANGE: /* Same as WM_WININICHANGE */
+    if (wParam == SPI_SETICONMETRICS ||
+        wParam == SPI_SETICONTITLELOGFONT ||
+        wParam == SPI_SETNONCLIENTMETRICS ||
+        (!wParam && !lParam))
+    {
+      HFONT hOldDefaultFont = infoPtr->hDefaultFont;
+      BOOL bDefaultOrNullFont = (infoPtr->hDefaultFont == infoPtr->hFont || !infoPtr->hFont);
+      LOGFONTW logFont;
+      SystemParametersInfoW(SPI_GETICONTITLELOGFONT, 0, &logFont, 0);
+
+      if (infoPtr->autoSpacing)
+        LISTVIEW_SetIconSpacing(infoPtr, -1, -1);
+
+      if (infoPtr->hDefaultFont)
+        DeleteObject(infoPtr->hDefaultFont);
+      infoPtr->hDefaultFont = CreateFontIndirectW(&logFont);
+
+      if (bDefaultOrNullFont)
+      {
+        infoPtr->hFont = infoPtr->hDefaultFont;
+        // Check if we just deleted the font the header is using
+        if (infoPtr->hwndHeader && hOldDefaultFont == GetWindowFont(infoPtr->hwndHeader))
+            SendMessageW(infoPtr->hwndHeader, WM_SETFONT, (WPARAM)infoPtr->hFont, TRUE);
+      }
+
+      LISTVIEW_SaveTextMetrics(infoPtr);
+      LISTVIEW_UpdateItemSize(infoPtr);
+      LISTVIEW_UpdateScroll(infoPtr);
+      LISTVIEW_InvalidateRect(infoPtr, NULL);
+    }
+    return 0;
+#else
 /*	case WM_WININICHANGE: */
+#endif
 
   default:
     if ((uMsg >= WM_USER) && (uMsg < WM_APP) && !COMCTL32_IsReflectedMessage(uMsg))

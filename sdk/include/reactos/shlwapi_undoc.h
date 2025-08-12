@@ -1,29 +1,38 @@
 /*
- * ReactOS shlwapi
- *
- * Copyright 2009 Andrew Hill <ash77 at domain reactos.org>
- *
- * This library is free software; you can redistribute it and/or
- * modify it under the terms of the GNU Lesser General Public
- * License as published by the Free Software Foundation; either
- * version 2.1 of the License, or (at your option) any later version.
- *
- * This library is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
- * Lesser General Public License for more details.
- *
- * You should have received a copy of the GNU Lesser General Public
- * License along with this library; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ * PROJECT:     ReactOS header
+ * LICENSE:     LGPL-2.1-or-later (https://spdx.org/licenses/LGPL-2.1-or-later)
+ * PURPOSE:     Undocumented SHLWAPI definitions
+ * COPYRIGHT:   Copyright 2009 Andrew Hill <ash77 at domain reactos.org>
+ *              Copyright 2025 Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
  */
 
-#ifndef __SHLWAPI_UNDOC_H
-#define __SHLWAPI_UNDOC_H
+#pragma once
+
+#include <winreg.h> // For REGSAM
 
 #ifdef __cplusplus
 extern "C" {
-#endif /* defined(__cplusplus) */
+#endif
+
+/*****************************************************************************
+ * ASSOCQUERY --- The type flags of association query
+ *
+ * @see IAssociationElementOld, IAssociationElement, IAssociationArrayOld, IAssociationArray
+ * @see https://www.geoffchappell.com/studies/windows/shell/shell32/api/assocelem/query.htm
+ */
+typedef DWORD ASSOCQUERY;
+#define ASSOCQUERY_LOWORD_MASK     0x0000FFFF // The low-order word of flags
+#define ASSOCQUERY_STRING          0x00010000 // Responds to QueryString method
+#define ASSOCQUERY_EXISTS          0x00020000 // Responds to QueryExists method
+#define ASSOCQUERY_DIRECT          0x00040000 // Responds to QueryDirect method
+#define ASSOCQUERY_DWORD           0x00080000 // Responds to QueryDword method
+#define ASSOCQUERY_INDIRECT        0x00100000 // Obtains resource string from QueryString
+#define ASSOCQUERY_OBJECT          0x00200000 // Responds to QueryObject method
+#define ASSOCQUERY_GUID            0x00400000 // Responds to QueryGuid method
+#define ASSOCQUERY_EXTRA_NON_VERB  0x01000000 // Expects pszExtra for path or value
+#define ASSOCQUERY_EXTRA_VERB      0x02000000 // Expects pszExtra for verb
+#define ASSOCQUERY_SIGNIFICANCE    0x04000000 // Significance unknown
+#define ASSOCQUERY_FALLBACK        0x80000000 // Fallback to secondary query source
 
 #define SHELL_NO_POLICY ((DWORD)-1)
 
@@ -77,6 +86,7 @@ BOOL WINAPI SHAboutInfoW(LPWSTR lpszDest, DWORD dwDestLen);
 #define SHAboutInfo SHAboutInfoA
 #endif
 
+HRESULT WINAPI CLSIDFromStringWrap(_In_ LPCWSTR idstr, _Out_ CLSID *id);
 HMODULE WINAPI SHPinDllOfCLSID(REFIID refiid);
 HRESULT WINAPI IUnknown_QueryStatus(IUnknown *lpUnknown, REFGUID pguidCmdGroup, ULONG cCmds, OLECMD *prgCmds, OLECMDTEXT* pCmdText);
 HRESULT WINAPI IUnknown_Exec(IUnknown* lpUnknown, REFGUID pguidCmdGroup, DWORD nCmdID, DWORD nCmdexecopt, VARIANT* pvaIn, VARIANT* pvaOut);
@@ -91,20 +101,40 @@ UINT WINAPI SHEnableMenuItem(HMENU hMenu, UINT wItemID, BOOL bEnable);
 DWORD WINAPI SHCheckMenuItem(HMENU hMenu, UINT uID, BOOL bCheck);
 DWORD WINAPI SHRegisterClassA(WNDCLASSA *wndclass);
 BOOL WINAPI SHSimulateDrop(IDropTarget *pDrop, IDataObject *pDataObj, DWORD grfKeyState, PPOINTL lpPt, DWORD* pdwEffect);
-HMENU WINAPI SHGetMenuFromID(HMENU hMenu, UINT uID);
 DWORD WINAPI SHGetCurColorRes(void);
+HMENU WINAPI SHGetMenuFromID(HMENU hMenu, UINT uID);
+DWORD WINAPI SHMenuIndexFromID(HMENU hMenu, UINT uID);
 DWORD WINAPI SHWaitForSendMessageThread(HANDLE hand, DWORD dwTimeout);
 DWORD WINAPI SHSendMessageBroadcastW(UINT uMsg, WPARAM wParam, LPARAM lParam);
 HRESULT WINAPI SHIsExpandableFolder(LPSHELLFOLDER lpFolder, LPCITEMIDLIST pidl);
 DWORD WINAPI SHFillRectClr(HDC hDC, LPCRECT pRect, COLORREF cRef);
 int WINAPI SHSearchMapInt(const int *lpKeys, const int *lpValues, int iLen, int iKey);
 VOID WINAPI IUnknown_Set(IUnknown **lppDest, IUnknown *lpUnknown);
-HRESULT WINAPI MayQSForward(IUnknown* lpUnknown, PVOID lpReserved, REFGUID riidCmdGrp, ULONG cCmds, OLECMD *prgCmds, OLECMDTEXT *pCmdText);
-HRESULT WINAPI MayExecForward(IUnknown* lpUnknown, INT iUnk, REFGUID pguidCmdGroup, DWORD nCmdID, DWORD nCmdexecopt, VARIANT *pvaIn, VARIANT *pvaOut);
-HRESULT WINAPI IsQSForward(REFGUID pguidCmdGroup,ULONG cCmds, OLECMD *prgCmds);
+
+HRESULT WINAPI
+MayQSForward(
+    _In_ IUnknown *lpUnknown,
+    _In_ INT nUnknown,
+    _In_opt_ REFGUID riidCmdGrp,
+    _In_ ULONG cCmds,
+    _Inout_ OLECMD *prgCmds,
+    _Inout_ OLECMDTEXT *pCmdText);
+
+HRESULT WINAPI
+MayExecForward(
+    _In_ IUnknown *lpUnknown,
+    _In_ INT nUnknown,
+    _In_opt_ REFGUID pguidCmdGroup,
+    _In_ DWORD nCmdID,
+    _In_ DWORD nCmdexecopt,
+    _In_ VARIANT *pvaIn,
+    _Inout_ VARIANT *pvaOut);
+
+HRESULT WINAPI IsQSForward(_In_opt_ REFGUID pguidCmdGroup, _In_ ULONG cCmds, _In_ OLECMD *prgCmds);
 BOOL WINAPI SHIsChildOrSelf(HWND hParent, HWND hChild);
 HRESULT WINAPI SHForwardContextMenuMsg(IUnknown* pUnk, UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT* pResult, BOOL useIContextMenu2);
 VOID WINAPI SHSetDefaultDialogFont(HWND hWnd, INT id);
+EXTERN_C BOOL WINAPI SHBoolSystemParametersInfo(UINT uiAction, PVOID pvParam);
 
 HRESULT WINAPI SHRegGetCLSIDKeyW(REFGUID guid, LPCWSTR lpszValue, BOOL bUseHKCU, BOOL bCreate, PHKEY phKey);
 
@@ -361,45 +391,74 @@ IContextMenu_Invoke(
     _In_ LPCSTR lpVerb,
     _In_ UINT uFlags);
 
+HRESULT WINAPI RunRegCommand(_In_opt_ HWND hWnd, _In_ HKEY hKey, _In_opt_ PCWSTR pszSubKey);
+HRESULT WINAPI RunIndirectRegCommand(_In_opt_ HWND hWnd, _In_ HKEY hKey, _In_opt_ PCWSTR pszSubKey, _In_ PCWSTR pszVerb);
+HRESULT WINAPI SHRunIndirectRegClientCommand(_In_ HWND hWnd, _In_ PCWSTR pszClientType);
+
 DWORD WINAPI SHGetObjectCompatFlags(IUnknown *pUnk, const CLSID *clsid);
 
-/*
- * HACK! These functions are conflicting with <shobjidl.h> inline functions...
- * We provide a macro option SHLWAPI_ISHELLFOLDER_HELPERS for using these functions.
+/* Flags for SHGetAppCompatFlags */
+#define SHACF_CONTEXTMENU           0x00000001
+#define SHACF_FLUSHNOWAITALWAYS     SHACF_CONTEXTMENU
+#define SHACF_DOCOBJECT             0x00000002
+#define SHACF_CORELINTERNETENUM     0x00000004
+#define SHACF_OLDCREATEVIEWWND      SHACF_CORELINTERNETENUM
+#define SHACF_WIN95DEFVIEW          SHACF_CORELINTERNETENUM
+#define SHACF_MYCOMPUTERFIRST       0x00000008
+#define SHACF_OLDREGITEMGDN         0x00000010
+// 0x00000020
+#define SHACF_LOADCOLUMNHANDLER     0x00000040
+#define SHACF_ANSI                  0x00000080
+#define SHACF_UNKNOWN1              0x00000100
+#define SHACF_WIN95SHLEXEC          0x00000200
+#define SHACF_STAROFFICE5PRINTER    0x00000400
+#define SHACF_NOVALIDATEFSIDS       0x00000800
+#define SHACF_FILEOPENNEEDSEXT      0x00001000
+#define SHACF_WIN95BINDTOOBJECT     0x00002000
+#define SHACF_IGNOREENUMRESET       0x00004000
+// 0x00008000
+#define SHACF_ANSIDISPLAYNAMES      0x00010000
+#define SHACF_FILEOPENBOGUSCTRLID   0x00020000
+#define SHACF_FORCELFNIDLIST        0x00040000
+// 0x00080000
+#define SHACF_UNKNOWN2              0x01000000
+#define SHACF_UNKNOWN3              0x80000000
+
+DWORD WINAPI SHGetAppCompatFlags(_In_ DWORD dwMask);
+
+/*****************************************************************************
+ * IAssociationElementOld interface
+ *
+ * @see IAssociationElement
+ * @see https://www.geoffchappell.com/studies/windows/shell/shlwapi/interfaces/iassociationelement.htm
  */
-#ifdef SHLWAPI_ISHELLFOLDER_HELPERS
-HRESULT WINAPI
-IShellFolder_GetDisplayNameOf(
-    _In_ IShellFolder *psf,
-    _In_ LPCITEMIDLIST pidl,
-    _In_ SHGDNF uFlags,
-    _Out_ LPSTRRET lpName,
-    _In_ DWORD dwRetryFlags);
+#define INTERFACE IAssociationElementOld
+DECLARE_INTERFACE_(IAssociationElementOld, IUnknown) // {E58B1ABF-9596-4DBA-8997-89DCDEF46992}
+{
+    /*** IUnknown ***/
+    STDMETHOD(QueryInterface)(THIS_ REFIID,PVOID*) PURE;
+    STDMETHOD_(ULONG,AddRef)(THIS) PURE;
+    STDMETHOD_(ULONG,Release)(THIS) PURE;
+    /*** IAssociationElementOld ***/
+    STDMETHOD(QueryString)(THIS_ ASSOCQUERY query, PCWSTR key, PWSTR *ppszValue) PURE;
+    STDMETHOD(QueryDword)(THIS_ ASSOCQUERY query, PCWSTR key, DWORD *pdwValue) PURE;
+    STDMETHOD(QueryExists)(THIS_ ASSOCQUERY query, PCWSTR key) PURE;
+    STDMETHOD(QueryDirect)(THIS_ ASSOCQUERY query, PCWSTR key, FLAGGED_BYTE_BLOB **ppBlob) PURE;
+    STDMETHOD(QueryObject)(THIS_ ASSOCQUERY query, PCWSTR key, REFIID riid, PVOID *ppvObj) PURE;
+};
+#undef INTERFACE
 
-/* Flags for IShellFolder_GetDisplayNameOf */
-#define SFGDNO_RETRYWITHFORPARSING  0x00000001
-#define SFGDNO_RETRYALWAYS          0x80000000
-
-HRESULT WINAPI
-IShellFolder_ParseDisplayName(
-    _In_ IShellFolder *psf,
-    _In_ HWND hwndOwner,
-    _In_ LPBC pbcReserved,
-    _In_ LPOLESTR lpszDisplayName,
-    _Out_ ULONG *pchEaten,
-    _Out_ PIDLIST_RELATIVE *ppidl,
-    _Out_ ULONG *pdwAttributes);
-
-EXTERN_C HRESULT WINAPI
-IShellFolder_CompareIDs(
-    _In_ IShellFolder *psf,
-    _In_ LPARAM lParam,
-    _In_ PCUIDLIST_RELATIVE pidl1,
-    _In_ PCUIDLIST_RELATIVE pidl2);
-#endif /* SHLWAPI_ISHELLFOLDER_HELPERS */
+#ifdef COBJMACROS
+#define IAssociationElementOld_QueryInterface(T,a,b) (T)->lpVtbl->QueryInterface(T,a,b)
+#define IAssociationElementOld_AddRef(T) (T)->lpVtbl->AddRef(T)
+#define IAssociationElementOld_Release(T) (T)->lpVtbl->Release(T)
+#define IAssociationElementOld_QueryString(T,a,b,c) (T)->lpVtbl->QueryString(T,a,b,c)
+#define IAssociationElementOld_QueryDword(T,a,b,c) (T)->lpVtbl->QueryDword(T,a,b,c)
+#define IAssociationElementOld_QueryExists(T,a,b) (T)->lpVtbl->QueryExists(T,a,b)
+#define IAssociationElementOld_QueryDirect(T,a,b,c) (T)->lpVtbl->QueryDirect(T,a,b,c)
+#define IAssociationElementOld_QueryObject(T,a,b,c,d) (T)->lpVtbl->QueryObject(T,a,b,c,d)
+#endif
 
 #ifdef __cplusplus
 } /* extern "C" */
-#endif /* defined(__cplusplus) */
-
-#endif /* __SHLWAPI_UNDOC_H */
+#endif

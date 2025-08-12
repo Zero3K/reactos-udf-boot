@@ -11,11 +11,11 @@ typedef struct _sys_mbox_t
 {
     KSPIN_LOCK Lock;
     LIST_ENTRY ListHead;
-    KEVENT Event;
+    KSEMAPHORE Semaphore;
     int Valid;
 } sys_mbox_t;
 
-typedef KIRQL sys_prot_t;
+typedef u32_t sys_prot_t;
 
 typedef u32_t sys_thread_t;
 
@@ -26,6 +26,9 @@ typedef struct _LWIP_MESSAGE_CONTAINER
 } LWIP_MESSAGE_CONTAINER, *PLWIP_MESSAGE_CONTAINER;
 
 #define sys_jiffies() sys_now()
+
+/* There is no such thing as "from ISR" for us */
+#define sys_mbox_trypost_fromisr sys_mbox_trypost
 
 /* NULL definitions */
 #define SYS_MBOX_NULL NULL

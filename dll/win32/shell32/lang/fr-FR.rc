@@ -88,6 +88,14 @@ BEGIN
     END
 END
 
+IDM_DVSELECT MENU
+BEGIN
+    POPUP ""
+    BEGIN
+        MENUITEM "Sé&lectionner", 0
+    END
+END
+
 IDD_BROWSE_FOR_FOLDER DIALOGEX 15, 40, 188, 192
 STYLE DS_SHELLFONT | DS_MODALFRAME | WS_CAPTION | WS_SYSMENU
 CAPTION "Parcourir"
@@ -596,17 +604,18 @@ BEGIN
     DEFPUSHBUTTON "Démarrer", IDOK, 53, 198, 60, 14
     PUSHBUTTON "Fermer", IDCANCEL, 118, 198, 60, 14
     LTEXT "Ca&pacité :", -1, 7, 6, 169, 9
-    COMBOBOX 28673, 7, 17, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28673, 7, 17, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT "Système de fichiers", -1, 7, 35, 170, 9
-    COMBOBOX 28677, 7, 46, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28677, 7, 46, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     CONTROL "", 28678, "MSCTLS_PROGRESS32", 0, 7, 181, 170, 8
     LTEXT "Taille d'unité d'&allocation", -1, 7, 64, 170, 9
-    COMBOBOX 28680, 7, 75, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | NOT WS_TABSTOP
+    COMBOBOX 28680, 7, 75, 170, 200, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
     LTEXT "Nom du volume", -1, 7, 93, 170, 9
     EDITTEXT 28679, 7, 103, 170, 13, ES_AUTOHSCROLL
     GROUPBOX "&Options de formatage", 4610, 7, 121, 170, 49
     AUTOCHECKBOX "Formatage rapide", 28674, 16, 135, 155, 10
     AUTOCHECKBOX "Activer la compression", 28675, 16, 152, 155, 10
+    CONTROL "", 30000, "STATIC", SS_ICON | WS_TABSTOP | SS_CENTERIMAGE | SS_NOTIFY, 7, 198, 15, 14
 END
 
 IDD_CHECK_DISK DIALOGEX 50, 50, 244, 115
@@ -629,8 +638,8 @@ CAPTION "Changer l'icône"
 FONT 8, "MS Shell Dlg", 400, 0, 0x1
 BEGIN
     LTEXT "Rechercher une icône pour ce fichier :", -1, 7, 7, 179, 10
-    PUSHBUTTON "Parcourir...", IDC_BUTTON_PATH, 135, 17, 50, 14
     EDITTEXT IDC_EDIT_PATH, 7, 17, 123, 14, ES_AUTOHSCROLL
+    PUSHBUTTON "Parcourir...", IDC_BUTTON_PATH, 135, 17, 50, 14
     LTEXT "Sélectionnez une icône dans la liste ci-dessous :", -1, 7, 36, 179, 10
     LISTBOX IDC_PICKICON_LIST, 7, 47, 181, 122, LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | LBS_MULTICOLUMN | LBS_DISABLENOSCROLL | WS_HSCROLL | WS_TABSTOP
     DEFPUSHBUTTON "OK", IDOK, 81, 179, 50, 14
@@ -907,7 +916,7 @@ BEGIN
 
     IDS_SHELL_ABOUT_AUTHORS "&Auteurs"
     IDS_SHELL_ABOUT_BACK "< Précédent"
-    FCIDM_SHVIEW_NEW "Ne&w" /* A menu item with an ampersand */
+    FCIDM_SHVIEW_NEW "&Nouveau"
     FCIDM_SHVIEW_NEWFOLDER "Nouveau d&ossier"
     FCIDM_SHVIEW_NEWLINK "Nouveau &lien"
     IDS_FOLDER_OPTIONS "Options du dossier"
@@ -967,7 +976,10 @@ BEGIN
     IDS_PRINT_VERB "Imprimer"
     IDS_CMD_VERB "Ouvrir l'invite de commandes"
 
+    IDS_MULTIPLETYPES   "Multiple Types"
+    IDS_VARIOUSFOLDERS  "Various Folders"
     IDS_FILE_FOLDER "%u fichiers, %u répertoires"
+
     IDS_PRINTERS "Imprimantes"
     IDS_FONTS "Polices"
     IDS_INSTALLNEWFONT "Installer une nouvelle police..."
@@ -982,10 +994,6 @@ BEGIN
     IDS_FILE_TYPES "Types de fichiers"
     IDS_COLUMN_EXTENSION "Extensions"
 
-    /* As in 'INI File' or 'WAV File', fallback string for no-name extensions
-       used in the _File type_ tab of the _Folder Options_ dialog */
-    IDS_FILE_EXT_TYPE "Fichier %s"
-
     IDS_BYTES_FORMAT "octets"
     IDS_UNKNOWN_APP "Application inconnue"
     IDS_EXE_DESCRIPTION "Description :"
@@ -993,6 +1001,12 @@ BEGIN
     IDS_MENU_EMPTY "(Vide)"
     IDS_OBJECTS "%d objet(s)"
     IDS_OBJECTS_SELECTED "%d objet(s) sélectionné(s)"
+
+    IDS_SEARCH_BROWSEITEM "Parcourir..."
+
+    IDS_RECYCLE_CLEANER_DISPLAYNAME "Recycle Bin"
+    IDS_RECYCLE_CLEANER_DESCRIPTION "The Recycle Bin contains files you have deleted from your computer. These files are not permanently removed until you empty the Recycle Bin."
+    IDS_RECYCLE_CLEANER_BUTTON_TEXT "&View Files"
 
     IDS_TITLE_MYCOMP "Poste de travail"
     IDS_TITLE_MYNET "Mon réseau"
@@ -1028,6 +1042,10 @@ BEGIN
     IDS_ADVANCED_DISPLAY_RUN "Display Run"
     IDS_ADVANCED_DISPLAY_ADMINTOOLS "Display Administrative Tools"
     IDS_ADVANCED_SMALL_START_MENU "Show Small Icons in Start menu"
+
+    IDS_VISEFFECT_DRAGFULL "Show window contents while dragging"
+    IDS_VISEFFECT_FONTSMOOTHING "Smooth edges of screen fonts"
+    IDS_VISEFFECT_LISTVIEWSHADOW "Use drop shadows for icon labels on the desktop"
 
     IDS_NEWEXT_ADVANCED_LEFT "<< A&vancé"
     IDS_NEWEXT_ADVANCED_RIGHT "A&vancé >>"

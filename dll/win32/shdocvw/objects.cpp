@@ -1,7 +1,7 @@
 /*
- * PROJECT:     ReactOS Explorer
+ * PROJECT:     ReactOS shdocvw
  * LICENSE:     LGPL-2.1-or-later (https://spdx.org/licenses/LGPL-2.1-or-later)
- * PURPOSE:     shdocvw.dll objects
+ * PURPOSE:     Shell objects
  * COPYRIGHT:   Copyright 2024 Katayama Hirofumi MZ <katayama.hirofumi.mz@gmail.com>
  */
 
@@ -23,12 +23,6 @@ void operator delete(void *ptr)
 void operator delete(void *ptr, size_t size)
 {
     ::LocalFree(ptr);
-}
-
-EXTERN_C void __cxa_pure_virtual(void)
-{
-    ERR("__cxa_pure_virtual\n");
-    ::DebugBreak();
 }
 
 BEGIN_OBJECT_MAP(ObjectMap)

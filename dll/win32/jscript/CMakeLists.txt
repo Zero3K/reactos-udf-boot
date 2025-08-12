@@ -4,7 +4,6 @@ add_definitions(
     -D__ROS_LONG64__
     -D_USE_MATH_DEFINES)
 
-include_directories(${REACTOS_SOURCE_DIR}/sdk/include/reactos/wine)
 spec2def(jscript.dll jscript.spec)
 
 list(APPEND SOURCE
@@ -65,7 +64,7 @@ add_idl_headers(jscript_idlheader jscript_classes.idl)
 add_typelib(jsglobal.idl)
 add_dependencies(jscript jscript_idlheader stdole2)
 set_module_type(jscript win32dll)
-target_link_libraries(jscript uuid wine)
+target_link_libraries(jscript uuid wine oldnames)
 add_importlibs(jscript user32 ole32 oleaut32 advapi32 msvcrt kernel32 ntdll)
 add_pch(jscript precomp.h "${PCH_SKIP_SOURCE}")
 add_cd_file(TARGET jscript DESTINATION reactos/system32 FOR all)

@@ -194,7 +194,7 @@ CNewMenu::CacheItems()
         if (pNewItem)
         {
             dwSize += wcslen(wszName) + 1;
-            if (!m_pLinkItem && wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
+            if (!m_pLinkItem && _wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
             {
                 /* The unique link handler */
                 m_pLinkItem = pNewItem;
@@ -277,7 +277,7 @@ CNewMenu::LoadCachedItems()
         pNewItem = LoadItem(wszName);
         if (pNewItem)
         {
-            if (!m_pLinkItem && wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
+            if (!m_pLinkItem && _wcsicmp(pNewItem->pwszExt, L".lnk") == 0)
             {
                 /* The unique link handler */
                 m_pLinkItem = pNewItem;
@@ -430,7 +430,7 @@ HRESULT CNewMenu::SelectNewItem(LONG wEventId, UINT uFlags, LPWSTR pszName, BOOL
         return S_OK;
 
     /* Get a pointer to the shell view */
-    hr = IUnknown_QueryService(m_pSite, SID_IFolderView, IID_PPV_ARG(IShellView, &lpSV));
+    hr = IUnknown_QueryService(m_pSite, SID_SFolderView, IID_PPV_ARG(IShellView, &lpSV));
     if (FAILED_UNEXPECTEDLY(hr))
         return S_OK;
 
@@ -704,7 +704,7 @@ HRESULT
 WINAPI
 CNewMenu::HandleMenuMsg(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-    return S_OK;
+    return HandleMenuMsg2(uMsg, wParam, lParam, NULL);
 }
 
 HRESULT
@@ -734,19 +734,19 @@ CNewMenu::HandleMenuMsg2(UINT uMsg, WPARAM wParam, LPARAM lParam, LRESULT *plRes
             if (!lpdis || lpdis->CtlType != ODT_MENU)
                 break;
 
-            DWORD id = LOWORD(lpdis->itemID);
+            DWORD id = lpdis->itemID;
             HICON hIcon = NULL;
-            if (m_idCmdFirst + id == m_idCmdFolder)
+            if (id == m_idCmdFolder)
             {
                 hIcon = m_hIconFolder;
             }
-            else if (m_idCmdFirst + id == m_idCmdLink)
+            else if (id == m_idCmdLink)
             {
                 hIcon = m_hIconLink;
             }
             else
             {
-                SHELLNEW_ITEM *pItem = FindItemFromIdOffset(id);
+                SHELLNEW_ITEM *pItem = FindItemFromIdOffset(id - m_idCmdFirst);
                 if (pItem)
                     hIcon = pItem->hIcon;
             }

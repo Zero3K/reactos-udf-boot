@@ -1,3 +1,6 @@
+@ stdcall LdrRegisterDllNotification(long ptr ptr ptr)
+@ stdcall LdrUnregisterDllNotification(ptr)
+
 @ stdcall RtlInitializeConditionVariable(ptr)
 @ stdcall RtlWakeConditionVariable(ptr)
 @ stdcall RtlWakeAllConditionVariable(ptr)
@@ -15,3 +18,5 @@
 
 @ stdcall RtlConnectToSm(ptr ptr long ptr) SmConnectToSm
 @ stdcall RtlSendMsgToSm(ptr ptr) SmSendMsgToSm
+@ stdcall RtlLcidToLocaleName(long ptr long long)
+@ stdcall RtlLocaleNameToLcid(wstr ptr long)

@@ -9,6 +9,8 @@
 
 #include <win32k.h>
 #include <immdev.h>
+#include <unaligned.h>
+
 DBG_DEFAULT_CHANNEL(UserWnd);
 
 INT gNestedWindowLimit = 50;
@@ -426,7 +428,7 @@ IntGetWindow(HWND hWnd,
                 break;
 
             default:
-                Wnd = NULL;
+                EngSetLastError(ERROR_INVALID_GW_COMMAND);
                 break;
     }
 
@@ -581,6 +583,7 @@ LRESULT co_UserFreeWindow(PWND Window,
    PWND Child;
    PMENU Menu;
    BOOLEAN BelongsToThreadData;
+   USER_REFERENCE_ENTRY Ref;
 
    ASSERT(Window);
 
@@ -738,7 +741,7 @@ LRESULT co_UserFreeWindow(PWND Window,
    WndSetChild(Window, NULL);
    WndSetLastActive(Window, NULL);
 
-   UserReferenceObject(Window);
+   UserRefObjectCo(Window, &Ref);
    UserMarkObjectDestroy(Window);
 
    IntDestroyScrollBars(Window);
@@ -767,7 +770,7 @@ LRESULT co_UserFreeWindow(PWND Window,
 //   ASSERT(Window != NULL);
    UserFreeWindowInfo(Window->head.pti, Window);
 
-   UserDereferenceObject(Window);
+   UserDerefObjectCo(Window);
    UserDeleteObject(UserHMGetHandle(Window), TYPE_WINDOW);
 
    return 0;
@@ -1715,13 +1718,17 @@ IntFixWindowCoordinates(CREATESTRUCTW* Cs, PWND ParentWindow, DWORD* dwShowMode)
    /* default positioning for overlapped windows */
     if(!(Cs->style & (WS_POPUP | WS_CHILD)))
    {
-      PMONITOR pMonitor;
+      PMONITOR pMonitor = NULL;
       PRTL_USER_PROCESS_PARAMETERS ProcessParams;
+      PPROCESSINFO ppi = PsGetCurrentProcessWin32Process();
 
-      pMonitor = UserGetPrimaryMonitor();
+      if (ppi && ppi->hMonitor)
+         pMonitor = UserGetMonitorObject(ppi->hMonitor);
+      if (!pMonitor)
+         pMonitor = UserGetPrimaryMonitor();
 
       /* Check if we don't have a monitor attached yet */
-      if(pMonitor == NULL)
+      if (pMonitor == NULL)
       {
           Cs->x = Cs->y = 0;
           Cs->cx = 800;
@@ -1828,7 +1835,7 @@ PWND FASTCALL IntCreateWindow(CREATESTRUCTW* Cs,
       }
       else
       { /*
-         * Note from MSDN <http://msdn.microsoft.com/en-us/library/aa913269.aspx>:
+         * Note from MSDN <https://learn.microsoft.com/en-us/previous-versions/aa913269(v=msdn.10)>:
          *
          * Dialog boxes and message boxes do not inherit layout, so you must
          * set the layout explicitly.
@@ -2570,6 +2577,16 @@ co_UserCreateWindowEx(CREATESTRUCTW* Cs,
    {
        /* Count only console windows manually */
        co_IntUserManualGuiCheck(TRUE);
+   }
+
+   /* Set the hotkey */
+   if (!(Window->style & (WS_POPUP | WS_CHILD)) || (Window->ExStyle & WS_EX_APPWINDOW))
+   {
+       if (pti->ppi->dwHotkey)
+       {
+          co_IntSendMessage(UserHMGetHandle(Window), WM_SETHOTKEY, pti->ppi->dwHotkey, 0);
+          pti->ppi->dwHotkey = 0; /* Only the first suitable window gets the hotkey */
+       }
    }
 
    TRACE("co_UserCreateWindowEx(%wZ): Created window %p\n", ClassName, hWnd);
@@ -3334,99 +3351,98 @@ Exit:
    return Ret;
 }
 
-
-/*
- * @implemented
- */
-PWND FASTCALL UserGetAncestor(PWND Wnd, UINT Type)
+/* @implemented */
+PWND FASTCALL
+UserGetAncestor(_In_ PWND pWnd, _In_ UINT uType)
 {
-   PWND WndAncestor, Parent;
+    PWND WndAncestor, Parent, pwndMessage;
+    PDESKTOP pDesktop;
+    PWND pwndDesktop;
 
-   if (UserHMGetHandle(Wnd) == IntGetDesktopWindow())
-   {
-      return NULL;
-   }
+    pDesktop = pWnd->head.rpdesk;
+    ASSERT(pDesktop);
+    ASSERT(pDesktop->pDeskInfo);
 
-   switch (Type)
-   {
-      case GA_PARENT:
-         {
-            WndAncestor = Wnd->spwndParent;
-            break;
-         }
+    pwndDesktop = pDesktop->pDeskInfo->spwnd;
+    if (pWnd == pwndDesktop)
+        return NULL;
 
-      case GA_ROOT:
-         {
-            WndAncestor = Wnd;
-            Parent = NULL;
+    pwndMessage = pDesktop->spwndMessage;
+    if (pWnd == pwndMessage)
+        return NULL;
 
-            for(;;)
+    Parent = pWnd->spwndParent;
+    if (!Parent)
+        return NULL;
+
+    switch (uType)
+    {
+        case GA_PARENT:
+            return Parent;
+
+        case GA_ROOT:
+            WndAncestor = pWnd;
+            if (Parent == pwndDesktop)
+                break;
+
+            do
             {
-               if(!(Parent = WndAncestor->spwndParent))
-               {
-                  break;
-               }
-               if(IntIsDesktopWindow(Parent))
-               {
-                  break;
-               }
+                if (Parent == pwndMessage)
+                    break;
 
-               WndAncestor = Parent;
+                WndAncestor = Parent;
+
+                pDesktop = Parent->head.rpdesk;
+                ASSERT(pDesktop);
+                ASSERT(pDesktop->pDeskInfo);
+
+                Parent = Parent->spwndParent;
+            } while (Parent != pDesktop->pDeskInfo->spwnd);
+            break;
+
+        case GA_ROOTOWNER:
+            WndAncestor = pWnd;
+            for (PWND pwndNode = IntGetParent(pWnd); pwndNode; pwndNode = IntGetParent(pwndNode))
+            {
+                WndAncestor = pwndNode;
             }
             break;
-         }
 
-      case GA_ROOTOWNER:
-         {
-            WndAncestor = Wnd;
-
-            for (;;)
-            {
-               Parent = IntGetParent(WndAncestor);
-
-               if (!Parent)
-               {
-                  break;
-               }
-
-               WndAncestor = Parent;
-            }
-            break;
-         }
-
-      default:
-         {
+        default:
             return NULL;
-         }
-   }
+    }
 
-   return WndAncestor;
+    return WndAncestor;
 }
 
-/*
- * @implemented
- */
+/* @implemented */
 HWND APIENTRY
-NtUserGetAncestor(HWND hWnd, UINT Type)
+NtUserGetAncestor(_In_ HWND hWnd, _In_ UINT uType)
 {
-   PWND Window, Ancestor;
-   HWND Ret = NULL;
+    PWND Window, pwndAncestor;
+    HWND hwndAncestor = NULL;
 
-   TRACE("Enter NtUserGetAncestor\n");
-   UserEnterExclusive();
+    TRACE("Enter NtUserGetAncestor\n");
+    UserEnterShared();
 
-   Window = UserGetWindowObject(hWnd);
-   if (Window)
-   {
-      Ancestor = UserGetAncestor(Window, Type);
-      /* fixme: can UserGetAncestor ever return NULL for a valid window? */
+    Window = UserGetWindowObject(hWnd);
+    if (!Window)
+        goto Quit;
 
-      Ret = (Ancestor ? UserHMGetHandle(Ancestor) : NULL);
-   }
+    if (!uType || uType > GA_ROOTOWNER)
+    {
+        EngSetLastError(ERROR_INVALID_PARAMETER);
+        goto Quit;
+    }
 
-   TRACE("Leave NtUserGetAncestor, ret=%p\n", Ret);
-   UserLeave();
-   return Ret;
+    pwndAncestor = UserGetAncestor(Window, uType);
+    if (pwndAncestor)
+        hwndAncestor = UserHMGetHandle(pwndAncestor);
+
+Quit:
+    UserLeave();
+    TRACE("Leave NtUserGetAncestor returning %p\n", hwndAncestor);
+    return hwndAncestor;
 }
 
 ////
@@ -3842,16 +3858,18 @@ co_IntSetWindowLongPtr(HWND hWnd, DWORD Index, LONG_PTR NewValue, BOOL Ansi, ULO
          return 0;
       }
 
+      PVOID Address = (PUCHAR)(&Window[1]) + Index;
+
 #ifdef _WIN64
       if (Size == sizeof(LONG))
       {
-         OldValue = *((LONG *)((PCHAR)(Window + 1) + Index));
-         *((LONG*)((PCHAR)(Window + 1) + Index)) = (LONG)NewValue;
+         OldValue = ReadUnalignedU32(Address);
+         WriteUnalignedU32(Address, NewValue);
       }
       else
 #endif
       {
-         OldValue = *((LONG_PTR *)((PCHAR)(Window + 1) + Index));
+         OldValue = ReadUnalignedUlongPtr(Address);
          /*
          if ( Index == DWLP_DLGPROC && Wnd->state & WNDS_DIALOGWINDOW)
          {
@@ -3859,7 +3877,7 @@ co_IntSetWindowLongPtr(HWND hWnd, DWORD Index, LONG_PTR NewValue, BOOL Ansi, ULO
             if (!OldValue) return 0;
          }
          */
-         *((LONG_PTR*)((PCHAR)(Window + 1) + Index)) = NewValue;
+         WriteUnalignedUlongPtr(Address, NewValue);
       }
 
    }

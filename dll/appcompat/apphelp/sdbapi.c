@@ -501,7 +501,9 @@ BOOL WINAPI SdbGetDatabaseVersion(LPCWSTR database, PDWORD VersionHi, PDWORD Ver
  */
 BOOL WINAPI SdbGetDatabaseInformation(PDB pdb, PDB_INFORMATION information)
 {
-    if (pdb && information)
+    RtlZeroMemory(information, sizeof(*information));
+
+    if (pdb)
     {
         information->dwFlags = 0;
         information->dwMajor = pdb->major;
@@ -553,7 +555,7 @@ TAGID WINAPI SdbFindFirstNamedTag(PDB pdb, TAGID root, TAGID find, TAGID nametag
         if (tmp != TAGID_NULL)
         {
             LPCWSTR name = SdbGetStringTagPtr(pdb, tmp);
-            if (name && !wcsicmp(name, find_name))
+            if (name && !_wcsicmp(name, find_name))
                 return iter;
         }
         iter = SdbFindNextTag(pdb, root, iter);

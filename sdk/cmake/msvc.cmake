@@ -32,10 +32,16 @@ endif()
 
 add_definitions(/D__STDC__=1)
 
+# Enable correct values of __cplusplus macro for newer standards
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>)
+
 # Ignore any "standard" include paths, and do not use any default CRT library.
 if(CMAKE_C_COMPILER_ID STREQUAL "MSVC")
     add_compile_options(/X /Zl)
 endif()
+
+# Erase warning C4819 for Far East Asian: The file contains characters that cannot be displayed in the current code page
+add_compile_options(/wd4819)
 
 # Disable buffer security checks by default.
 add_compile_options(/GS-)
@@ -75,6 +81,14 @@ if(ARCH STREQUAL "amd64" AND MSVC_VERSION GREATER 1922)
     add_link_options(/d2:-FH4-)
 endif()
 
+# Workaround: Newer ARM64 builds do not inline interlocked functions by default.
+# A better fix would be to implement the interlocked functions in assembly.
+# See https://devblogs.microsoft.com/cppblog/introducing-the-forceinterlockedfunctions-switch-for-arm64/
+if(ARCH STREQUAL "arm64" AND MSVC_VERSION GREATER_EQUAL 1944)
+    message(STATUS "Forcing interlocked functions to be inlined for ARM64 builds")
+    add_compile_options("/forceInterlockedFunctions-")
+endif()
+
 # Generate Warnings Level 3
 add_compile_options(/W3)
 
@@ -97,7 +111,7 @@ endif()
 
 # On x86 Debug builds, if it's not Clang-CL or msbuild, treat all warnings as errors
 if ((ARCH STREQUAL "i386") AND (CMAKE_BUILD_TYPE STREQUAL "Debug") AND (CMAKE_C_COMPILER_ID STREQUAL "MSVC") AND (NOT MSVC_IDE))
-    set(TREAT_ALL_WARNINGS_AS_ERRORS=TRUE)
+    set(TREAT_ALL_WARNINGS_AS_ERRORS TRUE)
 endif()
 
 # Define ALLOW_WARNINGS=TRUE on the cmake/configure command line to bypass errors
@@ -144,15 +158,27 @@ endif()
 add_compile_options(/w14115)
 
 if(CMAKE_C_COMPILER_ID STREQUAL "Clang")
-    add_compile_options($<$<COMPILE_LANGUAGE:C,CXX>:-Werror=unknown-warning-option>)
-    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-nostdinc;-Wno-multichar;-Wno-char-subscripts;-Wno-microsoft-enum-forward-reference;-Wno-pragma-pack;-Wno-microsoft-anon-tag;-Wno-parentheses-equality;-Wno-unknown-pragmas>")
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-nostdinc>")
+    add_compile_options(
+        -Wno-unknown-warning-option
+        -Wno-multichar
+        -Wno-char-subscripts
+        -Wno-microsoft-enum-forward-reference
+        -Wno-pragma-pack
+        -Wno-microsoft-anon-tag
+        -Wno-parentheses-equality
+        -Wno-unknown-pragmas
+        -Wno-ignored-pragmas
+        -Wno-ignored-pragma-intrinsic
+        -Wno-microsoft-exception-spec
+    )
 endif()
 
 # Debugging
 if(NOT (_PREFAST_ OR _VS_ANALYZE_))
     add_compile_options($<$<CONFIG:Debug>:/Zi>)
 endif()
-add_compile_definitions($<$<CONFIG:Release>:NDEBUG>)
+add_compile_definitions($<$<CONFIG:Release>:NDEBUG=>)
 
 # Hotpatchable images
 if(ARCH STREQUAL "i386")
@@ -205,12 +231,16 @@ else()
     set(CMAKE_RC_COMPILE_OBJECT "<CMAKE_RC_COMPILER> /nologo <INCLUDES> <FLAGS> <DEFINES> ${I18N_DEFS} /fo <OBJECT> <SOURCE>")
 endif()
 
+if(MSVC_VERSION GREATER_EQUAL 1936)
+    set(_quiet_flag "/quiet")
+endif()
+
 # We don't put <INCLUDES> <DEFINES> <FLAGS> because this is handled in add_asm_files macro
 if (NOT MSVC_IDE)
     if(ARCH STREQUAL "arm" OR ARCH STREQUAL "arm64")
         set(CMAKE_ASM_MASM_COMPILE_OBJECT "<CMAKE_ASM_MASM_COMPILER> -nologo -o <OBJECT> <SOURCE>")
     else()
-        set(CMAKE_ASM_MASM_COMPILE_OBJECT "<CMAKE_ASM_MASM_COMPILER> /nologo /Cp /Fo <OBJECT> /c /Ta <SOURCE>")
+        set(CMAKE_ASM_MASM_COMPILE_OBJECT "<CMAKE_ASM_MASM_COMPILER> /nologo ${_quiet_flag} /Cp /Fo <OBJECT> /c /Ta <SOURCE>")
     endif()
 endif()
 
@@ -313,7 +343,7 @@ function(fixup_load_config _target)
     # msvc knows how to generate a load_config so no hacks here
 endfunction()
 
-function(generate_import_lib _libname _dllname _spec_file __version_arg)
+function(generate_import_lib _libname _dllname _spec_file __version_arg __dbg_arg)
 
     set(_def_file ${CMAKE_CURRENT_BINARY_DIR}/${_libname}_implib.def)
     set(_asm_stubs_file ${CMAKE_CURRENT_BINARY_DIR}/${_libname}_stubs.asm)
@@ -322,14 +352,14 @@ function(generate_import_lib _libname _dllname _spec_file __version_arg)
     # Generate the def, asm stub and alias files
     add_custom_command(
         OUTPUT ${_asm_stubs_file} ${_def_file} ${_asm_impalias_file}
-        COMMAND native-spec2def --ms ${__version_arg} -a=${SPEC2DEF_ARCH} --implib -n=${_dllname} -d=${_def_file} -l=${_asm_stubs_file} -i=${_asm_impalias_file} ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file}
+        COMMAND native-spec2def --ms ${__version_arg} ${__dbg_arg} -a=${SPEC2DEF_ARCH} --implib -n=${_dllname} -d=${_def_file} -l=${_asm_stubs_file} -i=${_asm_impalias_file} ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file} native-spec2def)
 
     # Compile the generated asm stub file
     if(ARCH STREQUAL "arm" OR ARCH STREQUAL "arm64")
         set(_asm_stub_command ${CMAKE_ASM_MASM_COMPILER} -nologo -o ${_asm_stubs_file}.obj ${_asm_stubs_file})
     else()
-        set(_asm_stub_command ${CMAKE_ASM_MASM_COMPILER} /nologo /Cp /Fo${_asm_stubs_file}.obj /c /Ta ${_asm_stubs_file})
+        set(_asm_stub_command ${CMAKE_ASM_MASM_COMPILER} /nologo ${_quiet_flag} /Cp /Fo${_asm_stubs_file}.obj /c /Ta ${_asm_stubs_file})
     endif()
     add_custom_command(
         OUTPUT ${_asm_stubs_file}.obj
@@ -370,9 +400,10 @@ elseif(ARCH STREQUAL "arm64")
 else()
     set(SPEC2DEF_ARCH i386)
 endif()
+
 function(spec2def _dllname _spec_file)
 
-    cmake_parse_arguments(__spec2def "ADD_IMPORTLIB;NO_PRIVATE_WARNINGS;WITH_RELAY" "VERSION" "" ${ARGN})
+    cmake_parse_arguments(__spec2def "ADD_IMPORTLIB;NO_PRIVATE_WARNINGS;WITH_RELAY;WITH_DBG;NO_DBG" "VERSION" "" ${ARGN})
 
     # Get library basename
     get_filename_component(_file ${_dllname} NAME_WE)
@@ -392,17 +423,21 @@ function(spec2def _dllname _spec_file)
         set(__version_arg "--version=${DLL_EXPORT_VERSION}")
     endif()
 
+    if(__spec2def_WITH_DBG OR (DBG AND NOT __spec2def_NO_DBG))
+        set(__dbg_arg "--dbg")
+    endif()
+
     # Generate exports def and C stubs file for the DLL
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${_file}.def ${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c
-        COMMAND native-spec2def --ms -a=${SPEC2DEF_ARCH} -n=${_dllname} -d=${CMAKE_CURRENT_BINARY_DIR}/${_file}.def -s=${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c ${__with_relay_arg} ${__version_arg} ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file}
+        COMMAND native-spec2def --ms -a=${SPEC2DEF_ARCH} -n=${_dllname} -d=${CMAKE_CURRENT_BINARY_DIR}/${_file}.def -s=${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c ${__with_relay_arg} ${__version_arg} ${__dbg_arg} ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file}
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${_spec_file} native-spec2def)
 
     # Do not use precompiled headers for the stub file
     set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/${_file}_stubs.c PROPERTIES SKIP_PRECOMPILE_HEADERS ON)
 
     if(__spec2def_ADD_IMPORTLIB)
-        generate_import_lib(lib${_file} ${_dllname} ${_spec_file} "${__version_arg}")
+        generate_import_lib(lib${_file} ${_dllname} ${_spec_file} "${__version_arg}" "${__dbg_arg}")
         if(__spec2def_NO_PRIVATE_WARNINGS)
             set_property(TARGET lib${_file} APPEND PROPERTY STATIC_LIBRARY_OPTIONS /ignore:4104)
         endif()
@@ -447,7 +482,7 @@ function(CreateBootSectorTarget _target_name _asm_file _binary_file _base_addres
         COMMAND ${CMAKE_C_COMPILER} /nologo ${_no_std_includes_flag} /I${REACTOS_SOURCE_DIR}/sdk/include/asm /I${REACTOS_BINARY_DIR}/sdk/include/asm ${_includes} ${_defines} /D__ASM__ /D_USE_ML /EP /c ${_asm_file} > ${_temp_file}
         DEPENDS ${_asm_file})
 
-    set(_asm16_command ${CMAKE_ASM16_COMPILER} /nologo /Cp /Fo${_object_file} /c /Ta ${_temp_file})
+    set(_asm16_command ${CMAKE_ASM16_COMPILER} /nologo ${_quiet_flag} /Cp /Fo${_object_file} /c /Ta ${_temp_file})
 
     add_custom_command(
         OUTPUT ${_object_file}

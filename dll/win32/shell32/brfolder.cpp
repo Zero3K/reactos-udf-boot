@@ -11,10 +11,30 @@
 #include "precomp.h"
 
 #include <ui/layout.h> // Resizable window
+#include <compat_undoc.h> // RosGetProcessEffectiveVersion
 
 WINE_DEFAULT_DEBUG_CHANNEL(shell);
 
+INT WINAPI Shell_GetCachedImageIndexW(LPCWSTR szPath, INT nIndex, UINT Flags);
+
 #define SHV_CHANGE_NOTIFY (WM_USER + 0x1111)
+enum { SHGDN_TREE = SHGDN_NORMAL | SHGDN_INFOLDER };
+
+static LPITEMIDLIST
+ILCloneToDepth(LPCITEMIDLIST pidlSrc, UINT depth)
+{
+    SIZE_T cb = 0;
+    for (LPCITEMIDLIST pidl = pidlSrc; pidl && depth--; pidl = ILGetNext(pidl))
+        cb += pidl->mkid.cb;
+
+    LPITEMIDLIST pidlOut = (LPITEMIDLIST)SHAlloc(cb + sizeof(WORD));
+    if (pidlOut)
+    {
+        CopyMemory(pidlOut, pidlSrc, cb);
+        ZeroMemory(((BYTE*)pidlOut) + cb, sizeof(WORD));
+    }
+    return pidlOut;
+}
 
 struct BrFolder
 {
@@ -86,11 +106,12 @@ BrFolder_GetItemData(BrFolder *info, HTREEITEM hItem)
 }
 
 static SFGAOF
-BrFolder_GetItemAttributes(BrFolder *info, HTREEITEM hItem, SFGAOF Att)
+BrFolder_GetItemAttributes(BrFolder *info, HTREEITEM hItem, SFGAOF Query)
 {
     BrItemData *item = BrFolder_GetItemData(info, hItem);
+    SFGAOF Att = Query;
     HRESULT hr = item ? item->lpsfParent->GetAttributesOf(1, &item->pidlChild, &Att) : E_FAIL;
-    return SUCCEEDED(hr) ? Att : 0;
+    return SUCCEEDED(hr) ? (Query & Att) : 0;
 }
 
 static HRESULT
@@ -145,12 +166,9 @@ BrFolder_InitTreeView(BrFolder *info)
 {
     HIMAGELIST hImageList;
     HRESULT hr;
-    CComPtr<IShellFolder> lpsfParent;
-    CComPtr<IEnumIDList> pEnumChildren;
     HTREEITEM hItem;
 
     Shell_GetImageLists(NULL, &hImageList);
-
     if (hImageList)
         TreeView_SetImageList(info->hwndTreeView, hImageList, 0);
 
@@ -171,54 +189,29 @@ BrFolder_InitTreeView(BrFolder *info)
     ILRemoveLastID(pidlParent);
     PCIDLIST_RELATIVE pidlChild = ILFindLastID(pidlRoot);
 
-    if (_ILIsDesktop(pidlParent))
-    {
-        hr = SHGetDesktopFolder(&lpsfParent);
-        if (FAILED_UNEXPECTEDLY(hr))
-            return;
-    }
-    else
-    {
-        CComPtr<IShellFolder> lpsfDesktop;
-        hr = SHGetDesktopFolder(&lpsfDesktop);
-        if (FAILED_UNEXPECTEDLY(hr))
-            return;
-
-        hr = lpsfDesktop->BindToObject(pidlParent, NULL, IID_PPV_ARG(IShellFolder, &lpsfParent));
-        if (FAILED_UNEXPECTEDLY(hr))
-            return;
-    }
+    CComPtr<IShellFolder> lpsfParent;
+    hr = SHBindToObject(NULL, pidlParent, /*NULL, */ IID_PPV_ARG(IShellFolder, &lpsfParent));
+    if (FAILED_UNEXPECTEDLY(hr))
+        return;
 
     TreeView_DeleteItem(info->hwndTreeView, TVI_ROOT);
     hItem = BrFolder_InsertItem(info, lpsfParent, pidlChild, pidlParent, TVI_ROOT);
     TreeView_Expand(info->hwndTreeView, hItem, TVE_EXPAND);
 }
 
-static INT
-BrFolder_GetIcon(PCIDLIST_ABSOLUTE pidl, UINT uFlags)
+static HRESULT
+BrFolder_GetIconPair(BrItemData &item, TVITEMW &tvi)
 {
-    SHFILEINFOW sfi;
-    SHGetFileInfoW((LPCWSTR)pidl, 0, &sfi, sizeof(sfi), uFlags);
-    return sfi.iIcon;
-}
-
-static void
-BrFolder_GetIconPair(PCIDLIST_ABSOLUTE pidl, LPTVITEMW pItem)
-{
-    DWORD flags;
-
-    CComHeapPtr<ITEMIDLIST_ABSOLUTE> pidlDesktop;
-    if (!pidl)
+    INT open = -1;
+    INT normal = SHMapPIDLToSystemImageListIndex(item.lpsfParent, item.pidlChild, &open);
+    if (normal >= 0)
     {
-        pidlDesktop.Attach(_ILCreateDesktop());
-        pidl = pidlDesktop;
+        tvi.iImage = normal;
+        tvi.iSelectedImage = (open >= 0) ? open : normal;
+        return S_OK;
     }
-
-    flags = SHGFI_PIDL | SHGFI_SYSICONINDEX | SHGFI_SMALLICON;
-    pItem->iImage = BrFolder_GetIcon(pidl, flags);
-
-    flags = SHGFI_PIDL | SHGFI_SYSICONINDEX | SHGFI_SMALLICON | SHGFI_OPENICON;
-    pItem->iSelectedImage = BrFolder_GetIcon(pidl, flags);
+    tvi.iImage = tvi.iSelectedImage = Shell_GetCachedImageIndexW(swShell32Name, IDI_SHELL_FOLDER - 1, 0);
+    return S_FALSE;
 }
 
 /******************************************************************************
@@ -238,10 +231,10 @@ BrFolder_GetIconPair(PCIDLIST_ABSOLUTE pidl, LPTVITEMW pItem)
  */
 static BOOL
 BrFolder_GetName(
-    IShellFolder *lpsf,
-    PCIDLIST_RELATIVE pidlChild,
-    DWORD dwFlags,
-    LPWSTR lpFriendlyName)
+    _In_ IShellFolder *lpsf,
+    _In_ PCIDLIST_RELATIVE pidlChild,
+    _In_ DWORD dwFlags,
+    _Out_ PWSTR lpFriendlyName)
 {
     BOOL   bSuccess = FALSE;
     STRRET str;
@@ -252,6 +245,18 @@ BrFolder_GetName(
 
     TRACE("-- %s\n", debugstr_w(lpFriendlyName));
     return bSuccess;
+}
+
+static BOOL
+BrFolder_GetName(
+    _In_ BrFolder *info,
+    _In_ HTREEITEM hItem,
+    _In_ UINT Flags,
+    _Out_ PWSTR Buffer)
+{
+    if (BrItemData *item = BrFolder_GetItemData(info, hItem))
+        return BrFolder_GetName(item->lpsfParent, item->pidlChild, Flags, Buffer);
+    return FALSE;
 }
 
 static BOOL
@@ -295,30 +300,82 @@ BrFolder_TreeItemHasThisChild(
     return FALSE;
 }
 
-static void
-BrFolder_UpdateItem(
-    _In_ BrFolder *info,
-    _In_ HTREEITEM hItem)
+static HTREEITEM
+BrFolder_FindTreeItemOfAbsoluteItem(
+    _In_ BrFolder &info,
+    _In_ PCIDLIST_ABSOLUTE pidl,
+    _In_opt_ HTREEITEM hItem = NULL)
 {
-    BrItemData *pItemData = BrFolder_GetItemData(info, hItem);
-    if (!pItemData)
-        return;
+    if (!hItem)
+        hItem = TreeView_GetRoot(info.hwndTreeView);
 
-    TVITEMW item = { TVIF_HANDLE | TVIF_IMAGE | TVIF_SELECTEDIMAGE | TVIF_CHILDREN };
-    item.hItem = hItem;
+    for (; pidl && hItem; hItem = TreeView_GetNextSibling(info.hwndTreeView, hItem))
+    {
+        BrItemData *pItemData = BrFolder_GetItemData(&info, hItem);
+        if (ILIsEqual(pItemData->pidlFull, pidl))
+            return hItem;
+        HTREEITEM hChild = TreeView_GetChild(info.hwndTreeView, hItem);
+        if (hChild && (hChild = BrFolder_FindTreeItemOfAbsoluteItem(info, pidl, hChild)) != NULL)
+            return hChild;
+    }
+    return NULL;
+}
 
-    BrFolder_GetIconPair(pItemData->pidlFull, &item);
+static BOOL
+BrFolder_UpdateItemEx(
+    _In_ BrFolder &info,
+    _In_ HTREEITEM hItem,
+    _In_opt_ PCIDLIST_ABSOLUTE pidlFull,
+    _In_ UINT Flags = TVIF_TEXT | TVIF_IMAGE | TVIF_CHILDREN)
+{
+    ASSERT(hItem);
+    TVITEMW item = { (TVIF_HANDLE | Flags), hItem };
+    BrItemData *data = BrFolder_GetItemData(&info, hItem);
+    if (!data)
+        return FALSE;
+
+    if (pidlFull)
+    {
+        if ((pidlFull = ILClone(pidlFull)) == NULL)
+            return FALSE;
+        data->pidlFull.Free();
+        data->pidlFull.Attach(const_cast<PIDLIST_ABSOLUTE>(pidlFull));
+        data->pidlChild = ILFindLastID(data->pidlFull);
+        // Note: We assume lpsfParent does not change
+    }
+
+    WCHAR Name[MAX_PATH];
+    if (Flags & TVIF_TEXT)
+    {
+        item.pszText = Name;
+        if (!BrFolder_GetName(data->lpsfParent, data->pidlChild, SHGDN_TREE, Name))
+            return FALSE;
+    }
+
+    if (Flags & TVIF_IMAGE)
+    {
+        item.mask |= TVIF_SELECTEDIMAGE;
+        BrFolder_GetIconPair(*data, item);
+    }
 
     item.cChildren = 0;
     CComPtr<IEnumIDList> pEnum;
-    if (BrFolder_GetChildrenEnum(info, pItemData, &pEnum) == S_OK)
+    if ((Flags & TVIF_CHILDREN) && BrFolder_GetChildrenEnum(&info, data, &pEnum) == S_OK)
     {
         CComHeapPtr<ITEMIDLIST_RELATIVE> pidlTemp;
         if (pEnum->Next(1, &pidlTemp, NULL) == S_OK)
             ++item.cChildren;
     }
 
-    TreeView_SetItem(info->hwndTreeView, &item);
+    return TreeView_SetItem(info.hwndTreeView, &item);
+}
+
+static void
+BrFolder_UpdateItem(
+    _In_ BrFolder *info,
+    _In_ HTREEITEM hItem)
+{
+    BrFolder_UpdateItemEx(*info, hItem, NULL, TVIF_IMAGE | TVIF_CHILDREN);
 }
 
 /******************************************************************************
@@ -343,8 +400,17 @@ BrFolder_InsertItem(
     _In_ PCIDLIST_ABSOLUTE pidlParent,
     _In_ HTREEITEM hParent)
 {
+    if (!(BrowseFlagsToSHCONTF(info->lpBrowseInfo->ulFlags) & SHCONTF_NONFOLDERS))
+    {
+#ifdef BIF_BROWSEFILEJUNCTIONS
+        if (!(info->lpBrowseInfo->ulFlags & BIF_BROWSEFILEJUNCTIONS))
+#endif
+            if (SHGetAttributes(lpsf, pidlChild, SFGAO_STREAM) & SFGAO_STREAM)
+                return NULL; // .zip files have both FOLDER and STREAM attributes set
+    }
+
     WCHAR szName[MAX_PATH];
-    if (!BrFolder_GetName(lpsf, pidlChild, SHGDN_NORMAL, szName))
+    if (!BrFolder_GetName(lpsf, pidlChild, SHGDN_TREE, szName))
         return NULL;
 
     BrItemData *pItemData = new BrItemData();
@@ -356,11 +422,11 @@ BrFolder_InsertItem(
 
     PIDLIST_ABSOLUTE pidlFull =
         (pidlParent ? ILCombine(pidlParent, pidlChild) : ILClone(pidlChild));
-    BrFolder_GetIconPair(pidlFull, &item);
 
     pItemData->lpsfParent = lpsf;
     pItemData->pidlFull.Attach(pidlFull);
     pItemData->pidlChild = ILFindLastID(pItemData->pidlFull);
+    BrFolder_GetIconPair(*pItemData, item);
 
     if (BrFolder_GetChildrenEnum(info, pItemData, NULL) == S_OK)
         item.cChildren = 1;
@@ -406,8 +472,8 @@ BrFolder_Expand(
     ULONG ulFetched;
     while (S_OK == pEnum->Next(1, &pidlTemp, &ulFetched))
     {
-        if (!BrFolder_InsertItem(info, lpsf, pidlTemp, pidlFull, hParent))
-            break;
+        /* Ignore return value of BrFolder_InsertItem to avoid incomplete folder listing */
+        BrFolder_InsertItem(info, lpsf, pidlTemp, pidlFull, hParent);
         pidlTemp.Free(); // Finally, free the pidl that the shell gave us...
     }
 
@@ -515,7 +581,7 @@ BrFolder_Treeview_Changed(BrFolder *info, NMTREEVIEWW *pnmtv)
     info->pidlRet = ILClone(pItemData->pidlFull);
 
     WCHAR szName[MAX_PATH];
-    if (BrFolder_GetName(pItemData->lpsfParent, pItemData->pidlChild, SHGDN_NORMAL, szName))
+    if (BrFolder_GetName(pItemData->lpsfParent, pItemData->pidlChild, SHGDN_NORMAL | SHGDN_INFOLDER, szName))
         SetDlgItemTextW(info->hWnd, IDC_BROWSE_FOR_FOLDER_FOLDER_TEXT, szName);
 
     BrFolder_Callback(info->lpBrowseInfo, info->hWnd, BFFM_SELCHANGED, (LPARAM)info->pidlRet);
@@ -535,8 +601,8 @@ BrFolder_Treeview_Rename(BrFolder *info, NMTVDISPINFOW *pnmtv)
     ASSERT(BrFolder_GetItemAttributes(info, hItem, SFGAO_CANRENAME) & SFGAO_CANRENAME);
 
     PITEMID_CHILD newChild;
-    HRESULT hr = data->lpsfParent->SetNameOf(info->hWnd, data->pidlChild,
-                                             pnmtv->item.pszText, SHGDN_NORMAL, &newChild);
+    HRESULT hr = data->lpsfParent->SetNameOf(info->hWnd, data->pidlChild, pnmtv->item.pszText,
+                                             SHGDN_NORMAL | SHGDN_INFOLDER, &newChild);
     if (FAILED(hr))
         return FALSE;
 
@@ -554,10 +620,14 @@ BrFolder_Treeview_Rename(BrFolder *info, NMTVDISPINFOW *pnmtv)
     }
     ILFree(newChild);
 
+    BOOL AllowTreeTextChange = !BrFolder_UpdateItemEx(*info, hItem, NULL, TVIF_TEXT);
+
     NMTREEVIEWW nmtv;
+    nmtv.itemNew.hItem = hItem;
+    nmtv.itemNew.mask = TVIF_PARAM;
     nmtv.itemNew.lParam = (LPARAM)data;
     BrFolder_Treeview_Changed(info, &nmtv);
-    return TRUE;
+    return AllowTreeTextChange;
 }
 
 static HRESULT
@@ -571,25 +641,18 @@ BrFolder_Rename(BrFolder *info, HTREEITEM hItem)
 static void
 BrFolder_Delete(BrFolder *info, HTREEITEM hItem)
 {
-    SHFILEOPSTRUCTW fileop = { info->hwndTreeView };
-    WCHAR szzFrom[MAX_PATH + 1];
-
-    // Get item_data
-    BrItemData *item_data = BrFolder_GetItemData(info, hItem);
-
-    // Get the path
-    if (!SHGetPathFromIDListW(item_data->pidlFull, szzFrom))
-    {
-        ERR("SHGetPathFromIDListW failed\n");
+    BrItemData *data = BrFolder_GetItemData(info, hItem);
+    if (!data || !BrFolder_GetItemAttributes(info, hItem, SFGAO_CANDELETE))
         return;
-    }
-    szzFrom[lstrlenW(szzFrom) + 1] = UNICODE_NULL; // Double NULL-terminated
-    fileop.pFrom = szzFrom;
-
-    // Delete folder
-    fileop.fFlags = FOF_ALLOWUNDO;
-    fileop.wFunc = FO_DELETE;
-    SHFileOperationW(&fileop);
+    CComPtr<IContextMenu> pCM;
+    if (FAILED(data->lpsfParent->GetUIObjectOf(info->hWnd, 1, &data->pidlChild, IID_NULL_PPV_ARG(IContextMenu, &pCM))))
+        return;
+    UINT fCMIC = 0;
+    if (GetKeyState(VK_SHIFT) < 0)
+        fCMIC |= CMIC_MASK_SHIFT_DOWN;
+    if (GetKeyState(VK_CONTROL) < 0)
+        fCMIC |= CMIC_MASK_CONTROL_DOWN;
+    SHInvokeCommandOnContextMenu(info->hWnd, NULL, pCM, fCMIC, "delete");
 }
 
 static void
@@ -654,9 +717,18 @@ BrFolder_OnNotify(BrFolder *info, UINT CtlID, LPNMHDR lpnmh)
         case TVN_BEGINLABELEDITA:
         case TVN_BEGINLABELEDITW:
         {
+            HWND hWndEdit = TreeView_GetEditControl(lpnmh->hwndFrom);
             NMTVDISPINFO &tvdi = *(NMTVDISPINFO*)lpnmh;
             UINT att = BrFolder_GetItemAttributes(info, tvdi.item.hItem, SFGAO_CANRENAME);
-            return !(att & SFGAO_CANRENAME);
+            if (!(att & SFGAO_CANRENAME))
+            {
+                MessageBeep(0xffffffff);
+                return S_FALSE;
+            }
+            WCHAR Name[MAX_PATH];
+            if (BrFolder_GetName(info, tvdi.item.hItem, SHGDN_INFOLDER | SHGDN_FOREDITING, Name))
+                SetWindowTextW(hWndEdit, Name);
+            return S_OK;
         }
 
         case TVN_ENDLABELEDITW:
@@ -681,7 +753,7 @@ BrFolder_OnInitDialog(HWND hWnd, BrFolder *info)
     LPBROWSEINFOW lpBrowseInfo = info->lpBrowseInfo;
 
     info->hWnd = hWnd;
-    SetPropW(hWnd, L"__WINE_BRSFOLDERDLG_INFO", info);
+    SetWindowLongPtrW(hWnd, DWLP_USER, (LONG_PTR)info);
 
     if (lpBrowseInfo->ulFlags & BIF_NEWDIALOGSTYLE)
         FIXME("flags BIF_NEWDIALOGSTYLE partially implemented\n");
@@ -756,6 +828,19 @@ BrFolder_OnInitDialog(HWND hWnd, BrFolder *info)
                                                  SHCNRF_ShellLevel | SHCNRF_NewDelivery,
                                                  SHCNE_ALLEVENTS,
                                                  SHV_CHANGE_NOTIFY, 1, &ntreg);
+
+    if (!lpBrowseInfo->pidlRoot)
+    {
+        UINT csidl = (lpBrowseInfo->ulFlags & BIF_NEWDIALOGSTYLE) ? CSIDL_PERSONAL : CSIDL_DRIVES;
+        LPITEMIDLIST pidl = SHCloneSpecialIDList(NULL, csidl, TRUE);
+        if (pidl)
+        {
+            SendMessageW(info->hWnd, BFFM_SETSELECTION, FALSE, (LPARAM)pidl);
+            if (csidl == CSIDL_DRIVES)
+                SendMessageW(info->hWnd, BFFM_SETEXPANDED, FALSE, (LPARAM)pidl);
+            ILFree(pidl);
+        }
+    }
 
     BrFolder_Callback(info->lpBrowseInfo, hWnd, BFFM_INITIALIZED, 0);
 
@@ -976,31 +1061,14 @@ BrFolder_OnContextMenu(BrFolder &info, LPARAM lParam)
 }
 
 static BOOL
-BrFolder_OnSetExpandedPidl(BrFolder *info, LPITEMIDLIST pidlSelection, HTREEITEM *phItem)
+BrFolder_ExpandToPidl(BrFolder *info, LPITEMIDLIST pidlSelection, HTREEITEM *phItem)
 {
+    LPITEMIDLIST pidlCurrent = pidlSelection;
     if (_ILIsDesktop(pidlSelection))
     {
         if (phItem)
             *phItem = TVI_ROOT;
         return TRUE;
-    }
-
-    // Move pidlCurrent behind the SHITEMIDs in pidlSelection, which are the root of
-    // the sub-tree currently displayed.
-    PCIDLIST_ABSOLUTE pidlRoot = info->lpBrowseInfo->pidlRoot;
-    LPITEMIDLIST pidlCurrent = pidlSelection;
-    while (!_ILIsEmpty(pidlRoot) && _ILIsEqualSimple(pidlRoot, pidlCurrent))
-    {
-        pidlRoot = ILGetNext(pidlRoot);
-        pidlCurrent = ILGetNext(pidlCurrent);
-    }
-
-    // The given ID List is not part of the SHBrowseForFolder's current sub-tree.
-    if (!_ILIsEmpty(pidlRoot))
-    {
-        if (phItem)
-            *phItem = NULL;
-        return FALSE;
     }
 
     // Initialize item to point to the first child of the root folder.
@@ -1010,18 +1078,28 @@ BrFolder_OnSetExpandedPidl(BrFolder *info, LPITEMIDLIST pidlSelection, HTREEITEM
         item.hItem = TreeView_GetChild(info->hwndTreeView, item.hItem);
 
     // Walk the tree along the nodes corresponding to the remaining ITEMIDLIST
-    while (item.hItem && !_ILIsEmpty(pidlCurrent))
+    UINT depth = _ILGetDepth(info->lpBrowseInfo->pidlRoot);
+    while (item.hItem && pidlCurrent)
     {
-        TreeView_GetItem(info->hwndTreeView, &item);
-        BrItemData *pItemData = (BrItemData *)item.lParam;
-
-        if (_ILIsEqualSimple(pItemData->pidlChild, pidlCurrent))
+        LPITEMIDLIST pidlNeedle = ILCloneToDepth(pidlSelection, ++depth);
+        if (_ILIsEmpty(pidlNeedle))
         {
-            pidlCurrent = ILGetNext(pidlCurrent);
-            if (!_ILIsEmpty(pidlCurrent))
+            ILFree(pidlNeedle);
+            item.hItem = NULL; // Failure
+            break;
+        }
+next:
+        TreeView_GetItem(info->hwndTreeView, &item);
+        const BrItemData *pItemData = (BrItemData *)item.lParam;
+        if (ILIsEqual(pItemData->pidlFull, pidlNeedle))
+        {
+            BOOL done = _ILGetDepth(pidlSelection) == _ILGetDepth(pidlNeedle);
+            if (done)
             {
-                // Only expand current node and move on to its first child,
-                // if we didn't already reach the last SHITEMID
+                pidlCurrent = NULL; // Success
+            }
+            else
+            {
                 TreeView_Expand(info->hwndTreeView, item.hItem, TVE_EXPAND);
                 item.hItem = TreeView_GetChild(info->hwndTreeView, item.hItem);
             }
@@ -1029,7 +1107,10 @@ BrFolder_OnSetExpandedPidl(BrFolder *info, LPITEMIDLIST pidlSelection, HTREEITEM
         else
         {
             item.hItem = TreeView_GetNextSibling(info->hwndTreeView, item.hItem);
+            if (item.hItem)
+                goto next;
         }
+        ILFree(pidlNeedle);
     }
 
     if (phItem)
@@ -1039,19 +1120,26 @@ BrFolder_OnSetExpandedPidl(BrFolder *info, LPITEMIDLIST pidlSelection, HTREEITEM
 }
 
 static BOOL
-BrFolder_OnSetExpandedString(BrFolder *info, LPWSTR pszString, HTREEITEM *phItem)
+BrFolder_ExpandToString(BrFolder *info, LPWSTR pszString, HTREEITEM *phItem)
 {
-    CComPtr<IShellFolder> psfDesktop;
-    HRESULT hr = SHGetDesktopFolder(&psfDesktop);
-    if (FAILED_UNEXPECTEDLY(hr))
-        return FALSE;
-
     CComHeapPtr<ITEMIDLIST_ABSOLUTE> pidlSelection;
-    hr = psfDesktop->ParseDisplayName(NULL, NULL, pszString, NULL, &pidlSelection, NULL);
-    if (FAILED_UNEXPECTEDLY(hr))
-        return FALSE;
+    HRESULT hr = SHParseDisplayName(pszString, NULL, &pidlSelection, 0, NULL);
+    return SUCCEEDED(hr) && BrFolder_ExpandToPidl(info, pidlSelection, phItem);
+}
 
-    return BrFolder_OnSetExpandedPidl(info, pidlSelection, phItem);
+static BOOL
+BrFolder_OnSetExpanded(BrFolder *info, LPITEMIDLIST pidlSelection, LPWSTR pszString)
+{
+    HTREEITEM hItem;
+    BOOL ret;
+    if (pszString)
+        ret = BrFolder_ExpandToString(info, pszString, &hItem);
+    else
+        ret = BrFolder_ExpandToPidl(info, pidlSelection, &hItem);
+
+    if (ret)
+        TreeView_Expand(info->hwndTreeView, hItem, TVE_EXPAND);
+    return ret;
 }
 
 static BOOL
@@ -1061,7 +1149,7 @@ BrFolder_OnSetSelectionPidl(BrFolder *info, LPITEMIDLIST pidlSelection)
         return FALSE;
 
     HTREEITEM hItem;
-    BOOL ret = BrFolder_OnSetExpandedPidl(info, pidlSelection, &hItem);
+    BOOL ret = BrFolder_ExpandToPidl(info, pidlSelection, &hItem);
     if (ret)
         TreeView_SelectItem(info->hwndTreeView, hItem);
     return ret;
@@ -1074,7 +1162,7 @@ BrFolder_OnSetSelectionW(BrFolder *info, LPWSTR pszSelection)
         return FALSE;
 
     HTREEITEM hItem;
-    BOOL ret = BrFolder_OnSetExpandedString(info, pszSelection, &hItem);
+    BOOL ret = BrFolder_ExpandToString(info, pszSelection, &hItem);
     if (ret)
         TreeView_SelectItem(info->hwndTreeView, hItem);
     return ret;
@@ -1168,11 +1256,31 @@ BrFolder_Refresh(_Inout_ BrFolder *info)
 static void
 BrFolder_OnChangeEx(
     _Inout_ BrFolder *info,
-    _In_ PCIDLIST_ABSOLUTE pidl0,
     _In_ PCIDLIST_ABSOLUTE pidl1,
+    _In_ PCIDLIST_ABSOLUTE pidl2,
     _In_ LONG event)
 {
-    TRACE("(%p)->(%p, %p, 0x%lX)\n", info, pidl0, pidl1, event);
+    TRACE("(%p)->(%p, %p, 0x%lX)\n", info, pidl1, pidl2, event);
+
+    switch (event)
+    {
+        case SHCNE_RENAMEFOLDER:
+        case SHCNE_RENAMEITEM:
+        case SHCNE_UPDATEITEM:
+        {
+            UINT UpdateFlags = (event == SHCNE_UPDATEITEM) ? (TVIF_IMAGE | TVIF_CHILDREN) : (TVIF_TEXT);
+            if (HTREEITEM hTI = BrFolder_FindTreeItemOfAbsoluteItem(*info, pidl1))
+            {
+                if (BrFolder_UpdateItemEx(*info, hTI, pidl2, UpdateFlags))
+                {
+                    if ((hTI = TreeView_GetParent(info->hwndTreeView, hTI)) != NULL)
+                        TreeView_SortChildren(info->hwndTreeView, hTI, FALSE);
+                    return;
+                }
+            }
+            break;
+        }
+    }
 
     switch (event)
     {
@@ -1225,11 +1333,11 @@ BrFolderDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     if (uMsg == WM_INITDIALOG)
         return BrFolder_OnInitDialog(hWnd, (BrFolder *)lParam);
 
-    BrFolder *info = (BrFolder *)GetPropW(hWnd, L"__WINE_BRSFOLDERDLG_INFO");
+    BrFolder *info = (BrFolder *)GetWindowLongPtrW(hWnd, DWLP_USER);
     if (!info)
         return 0;
 
-    if (info->pContextMenu)
+    if (info->pContextMenu && SHELL_IsContextMenuMsg(uMsg))
     {
         LRESULT result;
         if (SHForwardContextMenuMsg(info->pContextMenu, uMsg, wParam,
@@ -1295,9 +1403,9 @@ BrFolderDlgProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
         case BFFM_SETEXPANDED: // Unicode only
             if (wParam) // String
-                return BrFolder_OnSetExpandedString(info, (LPWSTR)lParam, NULL);
+                return BrFolder_OnSetExpanded(info, NULL, (LPWSTR)lParam);
             else // PIDL
-                return BrFolder_OnSetExpandedPidl(info, (LPITEMIDLIST)lParam, NULL);
+                return BrFolder_OnSetExpanded(info, (LPITEMIDLIST)lParam, NULL);
 
         case SHV_CHANGE_NOTIFY:
             BrFolder_OnChange(info, wParam, lParam);
@@ -1353,16 +1461,23 @@ SHBrowseForFolderW(LPBROWSEINFOW lpbi)
 {
     TRACE("%p\n", lpbi);
 
+    // MSDN says the caller must initialize COM. We do it anyway in case the caller forgot.
+    COleInit OleInit;
     BrFolder info = { lpbi };
-
-    HRESULT hr = OleInitialize(NULL);
 
     INT id = ((lpbi->ulFlags & BIF_USENEWUI) ? IDD_BROWSE_FOR_FOLDER_NEW : IDD_BROWSE_FOR_FOLDER);
     INT_PTR ret = DialogBoxParamW(shell32_hInstance, MAKEINTRESOURCEW(id), lpbi->hwndOwner,
                                   BrFolderDlgProc, (LPARAM)&info);
-    if (SUCCEEDED(hr))
-        OleUninitialize();
-
+    if (ret == IDOK && !(lpbi->ulFlags & BIF_NOTRANSLATETARGETS) &&
+        RosGetProcessEffectiveVersion() >= _WIN32_WINNT_WINXP)
+    {
+        PIDLIST_ABSOLUTE pidlTarget;
+        if (SHELL_GetIDListTarget(info.pidlRet, &pidlTarget) == S_OK)
+        {
+            ILFree(info.pidlRet);
+            info.pidlRet = pidlTarget;
+        }
+    }
     if (ret != IDOK)
     {
         ILFree(info.pidlRet);
