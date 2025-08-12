@@ -18,17 +18,38 @@
 #include <winnls.h>
 #include <fmifs/fmifs.h>
 
+/* CALLBACKCOMMAND definitions for FMIFS callbacks */
+typedef enum {
+    PROGRESS,
+    DONEWITHSTRUCTURE,
+    UNKNOWN2,
+    UNKNOWN3,
+    UNKNOWN4,
+    UNKNOWN5,
+    INSUFFICIENTRIGHTS,
+    FSNOTSUPPORTED,
+    VOLUMEINUSE,
+    UNKNOWN9,
+    UNKNOWNA,
+    DONE,
+    UNKNOWNC,
+    UNKNOWND,
+    OUTPUT,
+    STRUCTUREPROGRESS,
+    CLUSTERSIZETOOSMALL,
+} CALLBACKCOMMAND;
+
 /* FUNCTIONS ****************************************************************/
 
 static VOID
 UdfLibMessage(IN PFMIFSCALLBACK Callback,
-              IN FMIFS_PACKET_TYPE PacketType,
+              IN CALLBACKCOMMAND Command,
               IN DWORD Percent,
               IN PVOID PacketData)
 {
     if (Callback != NULL)
     {
-        Callback(PacketType, Percent, PacketData);
+        Callback(Command, Percent, PacketData);
     }
 }
 
@@ -58,7 +79,7 @@ UdfChkdsk(IN PUNICODE_STRING DriveRoot,
     UNREFERENCED_PARAMETER(pUnknown3);
     UNREFERENCED_PARAMETER(pUnknown4);
 
-    UdfLibMessage(Callback, FMIFS_PROGRESS, 0, L"UDF check disk not implemented");
+    UdfLibMessage(Callback, PROGRESS, 0, L"UDF check disk not implemented");
 
     if (ExitStatus)
         *ExitStatus = Success ? 0 : 1;
@@ -135,7 +156,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     if (!NT_SUCCESS(Status))
     {
-        UdfLibMessage(Callback, FMIFS_INCOMPATIBLE_MEDIA, 0, L"Failed to open device");
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to open device");
         return FALSE;
     }
 
@@ -154,7 +175,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     if (!NT_SUCCESS(Status))
     {
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, FMIFS_INCOMPATIBLE_MEDIA, 0, L"Failed to get disk geometry");
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to get disk geometry");
         return FALSE;
     }
 
@@ -175,20 +196,20 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     if (!NT_SUCCESS(Status))
     {
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, FMIFS_INCOMPATIBLE_MEDIA, 0, L"Failed to get partition information");
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to get partition information");
         return FALSE;
     }
 
     SectorCount = PartitionInfo.PartitionLength.QuadPart / BytesPerSector;
 
-    UdfLibMessage(Callback, FMIFS_PROGRESS, 10, L"Preparing UDF 2.01 format");
+    UdfLibMessage(Callback, PROGRESS, 10, L"Preparing UDF 2.01 format");
 
     /* For now, we'll create a minimal UDF 2.01 implementation */
     /* This is a placeholder - actual UDF formatting would require
        writing proper UDF structures (Volume Descriptor Sequence,
        Anchor Volume Descriptor Pointers, etc.) */
 
-    UdfLibMessage(Callback, FMIFS_PROGRESS, 50, L"Writing UDF structures");
+    UdfLibMessage(Callback, PROGRESS, 50, L"Writing UDF structures");
 
     /* TODO: Implement actual UDF 2.01 formatting here */
     /* This would involve:
@@ -200,7 +221,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
      * 6. Creating root directory
      */
 
-    UdfLibMessage(Callback, FMIFS_PROGRESS, 100, L"UDF format complete");
+    UdfLibMessage(Callback, PROGRESS, 100, L"UDF format complete");
 
     Success = TRUE;
 
