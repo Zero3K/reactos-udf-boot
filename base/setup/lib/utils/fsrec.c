@@ -385,7 +385,8 @@ FileSystemToMBRPartitionType(
             }
         }
     }
-    else if (_wcsicmp(FileSystem, L"NTFS") == 0)
+    else if (_wcsicmp(FileSystem, L"NTFS") == 0 ||
+             _wcsicmp(FileSystem, L"UDF")  == 0)
     {
         return PARTITION_IFS;
     }

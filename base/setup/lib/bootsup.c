@@ -1277,6 +1277,67 @@ InstallBtrfsBootcodeToPartition(
 
 static
 NTSTATUS
+InstallUdfBootcodeToPartition(
+    IN PUNICODE_STRING SystemRootPath,
+    IN PUNICODE_STRING SourceRootPath,
+    IN PUNICODE_STRING DestinationArcPath)
+{
+    NTSTATUS Status;
+    BOOLEAN DoesFreeLdrExist;
+    WCHAR SrcPath[MAX_PATH];
+    WCHAR DstPath[MAX_PATH];
+
+    /* UDF partition */
+    DPRINT("System path: '%wZ'\n", SystemRootPath);
+
+    /* Copy FreeLoader to the system partition, always overwriting the older version */
+    CombinePaths(SrcPath, ARRAYSIZE(SrcPath), 2, SourceRootPath->Buffer, L"\\loader\\freeldr.sys");
+    CombinePaths(DstPath, ARRAYSIZE(DstPath), 2, SystemRootPath->Buffer, L"freeldr.sys");
+
+    DPRINT("Copy: %S ==> %S\n", SrcPath, DstPath);
+    Status = SetupCopyFile(SrcPath, DstPath, FALSE);
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("SetupCopyFile() failed (Status %lx)\n", Status);
+        return Status;
+    }
+
+    /* Verify that freeldr.sys is correctly installed */
+    DoesFreeLdrExist = DoesFileExist(NULL, DstPath);
+    if (DoesFreeLdrExist == FALSE)
+    {
+        DPRINT1("FreeLdr installation failed\n");
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    /* Create or update freeldr.ini */
+    if (DoesFileExist(NULL, SystemRootPath->Buffer) == FALSE) // SystemRootPath is not a file but a directory...
+    {
+        Status = CreateFreeLoaderIniForReactOS(SystemRootPath->Buffer, DestinationArcPath->Buffer);
+        if (!NT_SUCCESS(Status))
+        {
+            DPRINT1("CreateFreeLoaderIniForReactOS() failed (Status %lx)\n", Status);
+            return Status;
+        }
+
+        /* Install new bootsector on the disk */
+        /* Install UDF bootcode */
+        CombinePaths(SrcPath, ARRAYSIZE(SrcPath), 2, SourceRootPath->Buffer, L"\\loader\\udf.bin");
+
+        DPRINT1("Install UDF bootcode: %S ==> %S\n", SrcPath, SystemRootPath->Buffer);
+        Status = InstallBootCodeToDisk(SrcPath, SystemRootPath->Buffer, InstallUdfBootCode);
+        if (!NT_SUCCESS(Status))
+        {
+            DPRINT1("InstallBootCodeToDisk(UDF) failed (Status %lx)\n", Status);
+            return Status;
+        }
+    }
+
+    return STATUS_SUCCESS;
+}
+
+static
+NTSTATUS
 InstallNtfsBootcodeToPartition(
     IN PUNICODE_STRING SystemRootPath,
     IN PUNICODE_STRING SourceRootPath,
@@ -1403,6 +1464,12 @@ InstallVBRToPartition(
         return InstallBtrfsBootcodeToPartition(SystemRootPath,
                                                SourceRootPath,
                                                DestinationArcPath);
+    }
+    else if (wcsicmp(FileSystemName, L"UDF") == 0)
+    {
+        return InstallUdfBootcodeToPartition(SystemRootPath,
+                                             SourceRootPath,
+                                             DestinationArcPath);
     }
     /*
     else if (wcsicmp(FileSystemName, L"EXT2")  == 0 ||

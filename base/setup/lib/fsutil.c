@@ -23,6 +23,7 @@
 
 #include <fslib/vfatlib.h>
 #include <fslib/btrfslib.h>
+#include <fslib/udflib.h>
 // #include <fslib/ext2lib.h>
 // #include <fslib/ntfslib.h>
 
@@ -111,6 +112,16 @@ typedef struct _BTRFS_BOOTSECTOR
 } BTRFS_BOOTSECTOR, *PBTRFS_BOOTSECTOR;
 C_ASSERT(sizeof(BTRFS_BOOTSECTOR) == BTRFS_BOOTSECTOR_SIZE);
 
+typedef struct _UDF_BOOTSECTOR
+{
+    UCHAR JumpBoot[3];
+    UCHAR BootDrive;
+    ULONGLONG PartitionStartLBA;
+    UCHAR Fill[500]; // 512 - 12
+    USHORT BootSectorMagic;
+} UDF_BOOTSECTOR, *PUDF_BOOTSECTOR;
+C_ASSERT(sizeof(UDF_BOOTSECTOR) == UDF_BOOTSECTOR_SIZE);
+
 typedef struct _NTFS_BOOTSECTOR
 {
     UCHAR Jump[3];
@@ -167,6 +178,7 @@ static FILE_SYSTEM RegisteredFileSystems[] =
     { L"NTFS" , NtfsFormat, NtfsChkdsk },
 #endif
     { L"BTRFS", BtrfsFormat, BtrfsChkdsk },
+    { L"UDF"  , UdfFormat, UdfChkdsk },
 #if 0
     { L"EXT2" , Ext2Format, Ext2Chkdsk },
     { L"EXT3" , Ext2Format, Ext2Chkdsk },
@@ -680,6 +692,108 @@ Quit:
     if (!NT_SUCCESS(LockStatus))
     {
         DPRINT1("Failed to unlock BTRFS volume (Status 0x%lx)\n", LockStatus);
+    }
+
+    /* Free the new bootsector */
+    FreeBootCode(&NewBootSector);
+
+    return Status;
+}
+
+NTSTATUS
+InstallUdfBootCode(
+    IN PCWSTR SrcPath,          // UDF bootsector source file (on the installation medium)
+    IN HANDLE DstPath,          // Where to save the bootsector built from the source + partition information
+    IN HANDLE RootPartition)    // Partition holding the (old) UDF information
+{
+    NTSTATUS Status;
+    NTSTATUS LockStatus;
+    UNICODE_STRING Name;
+    IO_STATUS_BLOCK IoStatusBlock;
+    LARGE_INTEGER FileOffset;
+    PARTITION_INFORMATION_EX PartInfo;
+    BOOTCODE NewBootSector = {0};
+
+    /* Allocate and read the new bootsector from SrcPath */
+    RtlInitUnicodeString(&Name, SrcPath);
+    Status = ReadBootCodeFromFile(&NewBootSector,
+                                  &Name,
+                                  UDF_BOOTSECTOR_SIZE);
+    if (!NT_SUCCESS(Status))
+        return Status;
+
+    /*
+     * Lock the UDF volume in order to modify the first sector of the partition.
+     * If locking fails, we ignore and continue nonetheless.
+     */
+    LockStatus = NtFsControlFile(DstPath,
+                                 NULL,
+                                 NULL,
+                                 NULL,
+                                 &IoStatusBlock,
+                                 FSCTL_LOCK_VOLUME,
+                                 NULL,
+                                 0,
+                                 NULL,
+                                 0);
+    if (!NT_SUCCESS(LockStatus))
+    {
+        DPRINT1("WARNING: Failed to lock UDF volume for writing bootsector! Operations may fail! (Status 0x%lx)\n", LockStatus);
+    }
+
+    /* Obtain partition info and write it to the bootsector */
+    Status = NtDeviceIoControlFile(RootPartition,
+                                   NULL,
+                                   NULL,
+                                   NULL,
+                                   &IoStatusBlock,
+                                   IOCTL_DISK_GET_PARTITION_INFO_EX,
+                                   NULL,
+                                   0,
+                                   &PartInfo,
+                                   sizeof(PartInfo));
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("IOCTL_DISK_GET_PARTITION_INFO_EX failed (Status %lx)\n", Status);
+        goto Quit;
+    }
+
+    /* Write new bootsector to RootPath */
+    ((PUDF_BOOTSECTOR)NewBootSector.BootCode)->PartitionStartLBA =
+        PartInfo.StartingOffset.QuadPart / SECTORSIZE;
+
+    /* Write sector 0 */
+    FileOffset.QuadPart = 0ULL;
+    Status = NtWriteFile(DstPath,
+                         NULL,
+                         NULL,
+                         NULL,
+                         &IoStatusBlock,
+                         NewBootSector.BootCode,
+                         NewBootSector.Length,
+                         &FileOffset,
+                         NULL);
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("NtWriteFile() failed (Status %lx)\n", Status);
+        goto Quit;
+    }
+
+Quit:
+    /* Unlock the volume */
+    LockStatus = NtFsControlFile(DstPath,
+                                 NULL,
+                                 NULL,
+                                 NULL,
+                                 &IoStatusBlock,
+                                 FSCTL_UNLOCK_VOLUME,
+                                 NULL,
+                                 0,
+                                 NULL,
+                                 0);
+    if (!NT_SUCCESS(LockStatus))
+    {
+        DPRINT1("Failed to unlock UDF volume (Status 0x%lx)\n", LockStatus);
     }
 
     /* Free the new bootsector */
