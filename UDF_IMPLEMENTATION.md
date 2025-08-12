@@ -6,14 +6,14 @@ This implementation adds comprehensive UDF 2.01 filesystem support to ReactOS se
 
 ### 1. UDF Format Library (`sdk/lib/fslib/udflib/`)
 - **Purpose**: Provides UDF formatting capabilities during ReactOS setup
-- **Files**: 
+- **Files**:
   - `udflib.c` - UDF formatting implementation
   - `CMakeLists.txt` - Build configuration
   - `sdk/include/reactos/libs/fslib/udflib.h` - Public API header
 
 ### 2. Setup Library Integration (`base/setup/lib/`)
 - **fsutil.c**: Added UDF to registered filesystems list
-- **fsutil.h**: Added UDF boot sector size constant and function declarations  
+- **fsutil.h**: Added UDF boot sector size constant and function declarations
 - **utils/fsrec.c**: Added UDF partition type mapping (IFS partition type 0x07)
 - **bootsup.c**: Added UDF boot code installation functions
 
@@ -41,7 +41,7 @@ This implementation adds comprehensive UDF 2.01 filesystem support to ReactOS se
 2. **Partition Type**: Uses IFS partition type (0x07) for UDF volumes
 3. **Boot Code Installation**: Installs UDF-specific boot sectors
 
-### Boot Process  
+### Boot Process
 1. **UDF Boot Sector**: Custom boot sector that can load FreeLdr from UDF volumes
 2. **FreeLdr UDF Support**: FreeLdr can read files from UDF filesystems
 3. **Filesystem Detection**: UDF volumes are automatically detected and mounted
