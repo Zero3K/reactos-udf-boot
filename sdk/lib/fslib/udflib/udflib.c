@@ -18,8 +18,6 @@
 #include <winnls.h>
 #include <fmifs/fmifs.h>
 
-#include "udflib.h"
-
 /* FUNCTIONS ****************************************************************/
 
 static VOID
