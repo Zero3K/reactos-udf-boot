@@ -1,0 +1,33 @@
+/*
+ * PROJECT:     ReactOS FontExt Shell Extension
+ * LICENSE:     GPL-2.0+ (https://spdx.org/licenses/GPL-2.0+)
+ * PURPOSE:     Italian translation resource
+ * COPYRIGHT:   Copyright 2018 George Bișoc (george.bisoc@reactos.org)
+ */
+
+LANGUAGE LANG_ITALIAN, SUBLANG_NEUTRAL
+
+STRINGTABLE
+BEGIN
+    IDS_REACTOS_FONTS_FOLDER "Cartella dei font di ReactOS"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_COL_NAME "Nome"
+END
+
+STRINGTABLE
+BEGIN
+    IDS_COL_FILENAME "Nome File"
+    IDS_COL_SIZE "Dimensione"
+    IDS_COL_MODIFIED "Modificato"
+    IDS_COL_ATTR "Attributi"
+    IDS_COL_ATTR_LETTERS "RHSAC"
+END
+
+
+STRINGTABLE
+BEGIN
+    IDS_FONT_PREVIEW "Anteprima"
+END
