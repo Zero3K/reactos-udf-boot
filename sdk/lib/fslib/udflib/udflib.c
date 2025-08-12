@@ -16,9 +16,10 @@
 #include <ndk/obfuncs.h>
 #include <ndk/rtlfuncs.h>
 #include <winnls.h>
-#include <fmifs/fmifs.h>
 
-/* CALLBACKCOMMAND definitions for FMIFS callbacks */
+#ifndef __REACTOS__
+// the following definitions come from fmifs.h in ReactOS
+
 typedef enum {
     PROGRESS,
     DONEWITHSTRUCTURE,
@@ -38,6 +39,14 @@ typedef enum {
     STRUCTUREPROGRESS,
     CLUSTERSIZETOOSMALL,
 } CALLBACKCOMMAND;
+
+typedef BOOLEAN (NTAPI* PFMIFSCALLBACK)(CALLBACKCOMMAND Command, ULONG SubAction, PVOID ActionInfo);
+
+#else
+
+#include <fmifs/fmifs.h>
+
+#endif // __REACTOS__
 
 /* FUNCTIONS ****************************************************************/
 
