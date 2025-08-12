@@ -31,7 +31,7 @@ main:
     mov byte ptr [BootDrive], dl
 
 // Check if this computer supports extended reads
-CheckInt13hExtensions:                          
+CheckInt13hExtensions:
     mov  ah, HEX(41)                        // AH = 41h
     mov  bx, HEX(55aa)                      // BX = 55AAh
     int  HEX(13)                            // IBM/MS INT 13 Extensions - INSTALLATION CHECK
@@ -46,7 +46,7 @@ CheckInt13hExtensions:
 // to find and load freeldr.sys
 LoadFreeLdr:
     mov  eax, 2                             // Start reading from sector 2
-    mov  cx, 64                             // Read 64 sectors (32KB) 
+    mov  cx, 64                             // Read 64 sectors (32KB)
     mov  bx, FREELDR_BASE                   // Load to FREELDR_BASE
     call ReadSectors
 
