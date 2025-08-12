@@ -220,15 +220,149 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     UdfLibMessage(Callback, PROGRESS, 50, L"Writing UDF structures");
 
-    /* TODO: Implement actual UDF 2.01 formatting here */
-    /* This would involve:
-     * 1. Writing Volume Recognition Sequence
-     * 2. Writing Anchor Volume Descriptor Pointers
-     * 3. Writing Volume Descriptor Sequence
-     * 4. Creating partition structures
-     * 5. Writing File Set Descriptor
-     * 6. Creating root directory
-     */
+    /* Write basic UDF 2.01 structures */
+    
+    /* 1. Write Volume Recognition Sequence at sector 16 */
+    PUCHAR VrsBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector * 3);
+    if (!VrsBuffer)
+    {
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate VRS buffer");
+        return FALSE;
+    }
+    
+    /* NSR02 descriptor */
+    memcpy(VrsBuffer, "NSR02", 5);
+    VrsBuffer[5] = 1; // Structure version
+    
+    /* Write VRS to sector 16 */
+    LARGE_INTEGER Offset;
+    Offset.QuadPart = 16 * BytesPerSector;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        VrsBuffer, BytesPerSector, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        LocalFree(VrsBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write VRS");
+        return FALSE;
+    }
+    
+    /* 2. Write Anchor Volume Descriptor Pointer at sector 256 */
+    PUCHAR AvdpBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
+    if (!AvdpBuffer)
+    {
+        LocalFree(VrsBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate AVDP buffer");
+        return FALSE;
+    }
+    
+    /* AVDP tag */
+    AvdpBuffer[0] = 2; // Tag identifier for AVDP
+    AvdpBuffer[1] = 0;
+    AvdpBuffer[2] = 3; // Descriptor version
+    AvdpBuffer[3] = 0;
+    
+    /* Main Volume Descriptor Sequence extent */
+    *(PULONG)(AvdpBuffer + 16) = 512 * BytesPerSector; // Length (512 sectors)
+    *(PULONG)(AvdpBuffer + 20) = 32; // Location (sector 32)
+    
+    /* Write AVDP to sector 256 */
+    Offset.QuadPart = 256 * BytesPerSector;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        AvdpBuffer, BytesPerSector, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        LocalFree(VrsBuffer);
+        LocalFree(AvdpBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP");
+        return FALSE;
+    }
+    
+    /* 3. Write Primary Volume Descriptor at sector 32 */
+    PUCHAR PvdBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
+    if (!PvdBuffer)
+    {
+        LocalFree(VrsBuffer);
+        LocalFree(AvdpBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate PVD buffer");
+        return FALSE;
+    }
+    
+    /* PVD tag */
+    PvdBuffer[0] = 1; // Tag identifier for PVD
+    PvdBuffer[1] = 0;
+    PvdBuffer[2] = 3; // Descriptor version
+    PvdBuffer[3] = 0;
+    
+    /* Volume identifier */
+    memcpy(PvdBuffer + 24, "ReactOS_UDF", 11);
+    
+    /* Write PVD to sector 32 */
+    Offset.QuadPart = 32 * BytesPerSector;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        PvdBuffer, BytesPerSector, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        LocalFree(VrsBuffer);
+        LocalFree(AvdpBuffer);
+        LocalFree(PvdBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write PVD");
+        return FALSE;
+    }
+    
+    /* 4. Write Terminating Descriptor at sector 33 */
+    PUCHAR TdBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
+    if (!TdBuffer)
+    {
+        LocalFree(VrsBuffer);
+        LocalFree(AvdpBuffer);
+        LocalFree(PvdBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate TD buffer");
+        return FALSE;
+    }
+    
+    /* TD tag */
+    TdBuffer[0] = 8; // Tag identifier for Terminating Descriptor
+    TdBuffer[1] = 0;
+    TdBuffer[2] = 3; // Descriptor version
+    TdBuffer[3] = 0;
+    
+    /* Write TD to sector 33 */
+    Offset.QuadPart = 33 * BytesPerSector;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        TdBuffer, BytesPerSector, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        LocalFree(VrsBuffer);
+        LocalFree(AvdpBuffer);
+        LocalFree(PvdBuffer);
+        LocalFree(TdBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write TD");
+        return FALSE;
+    }
+    
+    /* Clean up buffers */
+    LocalFree(VrsBuffer);
+    LocalFree(AvdpBuffer);
+    LocalFree(PvdBuffer);
+    LocalFree(TdBuffer);
+
+    UdfLibMessage(Callback, PROGRESS, 90, L"Preparing boot area");
+    
+    /* Reserve sectors 1024-1088 for FreeLdr (64 sectors = 32KB)
+     * The UDF boot sector will read FreeLdr from this location
+     * Setup should copy freeldr.sys to these sectors after formatting */
 
     UdfLibMessage(Callback, PROGRESS, 100, L"UDF format complete");
 

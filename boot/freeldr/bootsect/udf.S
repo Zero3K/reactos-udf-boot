@@ -41,11 +41,12 @@ CheckInt13hExtensions:
     test cl, 1                              // si = API subset support bitmap
     jz   PrintDiskError                     // Bit 0, extended disk access functions (AH=42h-44h,47h,48h) supported
 
-// For now, just load FreeLDR from a known location
-// In a full UDF implementation, this would parse UDF structures
-// to find and load freeldr.sys
+// Load FreeLdr from UDF volume
+// For simplicity, we'll read from sector 1024 where FreeLdr should be placed
+// In a full UDF implementation, this would parse the Volume Descriptor Sequence
+// and File Set Descriptor to locate freeldr.sys in the directory structure
 LoadFreeLdr:
-    mov  eax, 2                             // Start reading from sector 2
+    mov  eax, 1024                          // Start reading from sector 1024 (reserved area)
     mov  cx, 64                             // Read 64 sectors (32KB)
     mov  bx, FREELDR_BASE                   // Load to FREELDR_BASE
     call ReadSectors

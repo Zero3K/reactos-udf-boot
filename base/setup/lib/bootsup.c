@@ -1331,6 +1331,69 @@ InstallUdfBootcodeToPartition(
             DPRINT1("InstallBootCodeToDisk(UDF) failed (Status %lx)\n", Status);
             return Status;
         }
+
+        /* For UDF, also copy freeldr.sys to sector 1024 where the boot sector expects it */
+        UNICODE_STRING Name;
+        OBJECT_ATTRIBUTES ObjectAttributes;
+        IO_STATUS_BLOCK IoStatusBlock;
+        HANDLE PartitionHandle;
+        HANDLE FileHandle;
+        LARGE_INTEGER FileOffset;
+        UCHAR Buffer[65536]; // 64KB buffer for freeldr.sys
+        ULONG BytesRead;
+
+        /* Open the partition for raw access */
+        RtlInitUnicodeString(&Name, SystemRootPath->Buffer);
+        if (Name.Length > sizeof(WCHAR) && Name.Buffer[Name.Length / sizeof(WCHAR) - 1] == L'\\')
+            Name.Length -= sizeof(WCHAR);
+
+        InitializeObjectAttributes(&ObjectAttributes, &Name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+        Status = NtOpenFile(&PartitionHandle, GENERIC_WRITE | SYNCHRONIZE, &ObjectAttributes,
+                           &IoStatusBlock, 0, FILE_SYNCHRONOUS_IO_NONALERT);
+        if (!NT_SUCCESS(Status))
+        {
+            DPRINT1("Failed to open partition for UDF FreeLdr raw copy (Status %lx)\n", Status);
+            return Status;
+        }
+
+        /* Open freeldr.sys file */
+        CombinePaths(SrcPath, ARRAYSIZE(SrcPath), 2, SourceRootPath->Buffer, L"\\loader\\freeldr.sys");
+        RtlInitUnicodeString(&Name, SrcPath);
+        InitializeObjectAttributes(&ObjectAttributes, &Name, OBJ_CASE_INSENSITIVE, NULL, NULL);
+        Status = NtOpenFile(&FileHandle, GENERIC_READ | SYNCHRONIZE, &ObjectAttributes,
+                           &IoStatusBlock, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_NONALERT);
+        if (!NT_SUCCESS(Status))
+        {
+            NtClose(PartitionHandle);
+            DPRINT1("Failed to open freeldr.sys for UDF raw copy (Status %lx)\n", Status);
+            return Status;
+        }
+
+        /* Read freeldr.sys */
+        Status = NtReadFile(FileHandle, NULL, NULL, NULL, &IoStatusBlock,
+                           Buffer, sizeof(Buffer), NULL, NULL);
+        NtClose(FileHandle);
+        if (!NT_SUCCESS(Status))
+        {
+            NtClose(PartitionHandle);
+            DPRINT1("Failed to read freeldr.sys for UDF raw copy (Status %lx)\n", Status);
+            return Status;
+        }
+
+        BytesRead = (ULONG)IoStatusBlock.Information;
+
+        /* Write freeldr.sys to sector 1024 (raw sector access) */
+        FileOffset.QuadPart = 1024 * 512; // Sector 1024
+        Status = NtWriteFile(PartitionHandle, NULL, NULL, NULL, &IoStatusBlock,
+                            Buffer, BytesRead, &FileOffset, NULL);
+        NtClose(PartitionHandle);
+        if (!NT_SUCCESS(Status))
+        {
+            DPRINT1("Failed to write freeldr.sys to UDF boot location (Status %lx)\n", Status);
+            return Status;
+        }
+
+        DPRINT1("Successfully copied freeldr.sys to UDF boot location (sector 1024)\n");
     }
 
     return STATUS_SUCCESS;

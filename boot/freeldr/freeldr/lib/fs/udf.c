@@ -68,7 +68,7 @@ static ARC_STATUS UdfOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
     FileHandle->DeviceId = FsGetDeviceId(*FileId);
     FileHandle->Position = 0;
     FileHandle->FileSize = 65536; // Assume 64KB for freeldr.sys
-    FileHandle->FileLBA = 2; // Assume it starts at sector 2
+    FileHandle->FileLBA = 1024; // Assume it starts at sector 1024 (matches boot sector)
 
     FsSetDeviceSpecific(*FileId, FileHandle);
 
@@ -153,7 +153,26 @@ const DEVVTBL* UdfMount(ULONG DeviceId)
     if (ArcRead(DeviceId, Buffer, sizeof(Buffer), &Count) != ESUCCESS)
         return NULL;
 
-    /* For now, just create a minimal UDF info structure */
+    /* Check for UDF Volume Recognition Sequence at sector 16 */
+    Position.QuadPart = 16 * UDF_SECTOR_SIZE;
+    if (ArcSeek(DeviceId, &Position, SeekAbsolute) != ESUCCESS)
+        return NULL;
+
+    if (ArcRead(DeviceId, Buffer, sizeof(Buffer), &Count) != ESUCCESS)
+        return NULL;
+
+    /* Check for NSR02 or NSR03 identifier */
+    if (Count >= 5 && (memcmp(Buffer, "NSR02", 5) == 0 || memcmp(Buffer, "NSR03", 5) == 0))
+    {
+        TRACE("UdfMount: Found UDF Volume Recognition Sequence\n");
+    }
+    else
+    {
+        TRACE("UdfMount: No UDF Volume Recognition Sequence found\n");
+        return NULL;
+    }
+
+    /* Create UDF info structure */
     UdfInfo = FrLdrTempAlloc(sizeof(struct UDF_INFO), TAG_UDF_INFO);
     if (!UdfInfo)
         return NULL;
