@@ -153,6 +153,8 @@ ARC_STATUS ArcOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
                     FileData[DeviceId].FileFuncTable = FatMount(DeviceId);
                 if (!FileData[DeviceId].FileFuncTable)
                     FileData[DeviceId].FileFuncTable = BtrFsMount(DeviceId);
+                if (!FileData[DeviceId].FileFuncTable)
+                    FileData[DeviceId].FileFuncTable = UdfMount(DeviceId);
 #ifndef _M_ARM
                 if (!FileData[DeviceId].FileFuncTable)
                     FileData[DeviceId].FileFuncTable = NtfsMount(DeviceId);

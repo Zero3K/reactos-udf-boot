@@ -92,6 +92,7 @@
 #include <fs/iso.h>
 #include <fs/pxe.h>
 #include <fs/btrfs.h>
+#include <fs/udf.h>
 
 /* UI support */
 #define printf TuiPrintf
