@@ -1,0 +1,399 @@
+diff --git a/base/setup/lib/bootsup.c b/base/setup/lib/bootsup.c
+index 68203291..5c22b16b 100644
+--- a/base/setup/lib/bootsup.c
++++ b/base/setup/lib/bootsup.c
+@@ -1331,6 +1331,69 @@ InstallUdfBootcodeToPartition(
+             DPRINT1("InstallBootCodeToDisk(UDF) failed (Status %lx)\n", Status);
+             return Status;
+         }
++
++        /* For UDF, also copy freeldr.sys to sector 1024 where the boot sector expects it */
++        UNICODE_STRING Name;
++        OBJECT_ATTRIBUTES ObjectAttributes;
++        IO_STATUS_BLOCK IoStatusBlock;
++        HANDLE PartitionHandle;
++        HANDLE FileHandle;
++        LARGE_INTEGER FileOffset;
++        UCHAR Buffer[65536]; // 64KB buffer for freeldr.sys
++        ULONG BytesRead;
++
++        /* Open the partition for raw access */
++        RtlInitUnicodeString(&Name, SystemRootPath->Buffer);
++        if (Name.Length > sizeof(WCHAR) && Name.Buffer[Name.Length / sizeof(WCHAR) - 1] == L'\\')
++            Name.Length -= sizeof(WCHAR);
++
++        InitializeObjectAttributes(&ObjectAttributes, &Name, OBJ_CASE_INSENSITIVE, NULL, NULL);
++        Status = NtOpenFile(&PartitionHandle, GENERIC_WRITE | SYNCHRONIZE, &ObjectAttributes,
++                           &IoStatusBlock, 0, FILE_SYNCHRONOUS_IO_NONALERT);
++        if (!NT_SUCCESS(Status))
++        {
++            DPRINT1("Failed to open partition for UDF FreeLdr raw copy (Status %lx)\n", Status);
++            return Status;
++        }
++
++        /* Open freeldr.sys file */
++        CombinePaths(SrcPath, ARRAYSIZE(SrcPath), 2, SourceRootPath->Buffer, L"\\loader\\freeldr.sys");
++        RtlInitUnicodeString(&Name, SrcPath);
++        InitializeObjectAttributes(&ObjectAttributes, &Name, OBJ_CASE_INSENSITIVE, NULL, NULL);
++        Status = NtOpenFile(&FileHandle, GENERIC_READ | SYNCHRONIZE, &ObjectAttributes,
++                           &IoStatusBlock, FILE_SHARE_READ, FILE_SYNCHRONOUS_IO_NONALERT);
++        if (!NT_SUCCESS(Status))
++        {
++            NtClose(PartitionHandle);
++            DPRINT1("Failed to open freeldr.sys for UDF raw copy (Status %lx)\n", Status);
++            return Status;
++        }
++
++        /* Read freeldr.sys */
++        Status = NtReadFile(FileHandle, NULL, NULL, NULL, &IoStatusBlock,
++                           Buffer, sizeof(Buffer), NULL, NULL);
++        NtClose(FileHandle);
++        if (!NT_SUCCESS(Status))
++        {
++            NtClose(PartitionHandle);
++            DPRINT1("Failed to read freeldr.sys for UDF raw copy (Status %lx)\n", Status);
++            return Status;
++        }
++
++        BytesRead = (ULONG)IoStatusBlock.Information;
++
++        /* Write freeldr.sys to sector 1024 (raw sector access) */
++        FileOffset.QuadPart = 1024 * 512; // Sector 1024
++        Status = NtWriteFile(PartitionHandle, NULL, NULL, NULL, &IoStatusBlock,
++                            Buffer, BytesRead, &FileOffset, NULL);
++        NtClose(PartitionHandle);
++        if (!NT_SUCCESS(Status))
++        {
++            DPRINT1("Failed to write freeldr.sys to UDF boot location (Status %lx)\n", Status);
++            return Status;
++        }
++
++        DPRINT1("Successfully copied freeldr.sys to UDF boot location (sector 1024)\n");
+     }
+ 
+     return STATUS_SUCCESS;
+diff --git a/boot/freeldr/bootsect/udf.S b/boot/freeldr/bootsect/udf.S
+index bb7b2eb0..f6a962e7 100644
+--- a/boot/freeldr/bootsect/udf.S
++++ b/boot/freeldr/bootsect/udf.S
+@@ -41,11 +41,12 @@ CheckInt13hExtensions:
+     test cl, 1                              // si = API subset support bitmap
+     jz   PrintDiskError                     // Bit 0, extended disk access functions (AH=42h-44h,47h,48h) supported
+ 
+-// For now, just load FreeLDR from a known location
+-// In a full UDF implementation, this would parse UDF structures
+-// to find and load freeldr.sys
++// Load FreeLdr from UDF volume
++// For simplicity, we'll read from sector 1024 where FreeLdr should be placed
++// In a full UDF implementation, this would parse the Volume Descriptor Sequence
++// and File Set Descriptor to locate freeldr.sys in the directory structure
+ LoadFreeLdr:
+-    mov  eax, 2                             // Start reading from sector 2
++    mov  eax, 1024                          // Start reading from sector 1024 (reserved area)
+     mov  cx, 64                             // Read 64 sectors (32KB)
+     mov  bx, FREELDR_BASE                   // Load to FREELDR_BASE
+     call ReadSectors
+diff --git a/boot/freeldr/freeldr/lib/fs/udf.c b/boot/freeldr/freeldr/lib/fs/udf.c
+index bb1fb1d6..26066580 100644
+--- a/boot/freeldr/freeldr/lib/fs/udf.c
++++ b/boot/freeldr/freeldr/lib/fs/udf.c
+@@ -68,7 +68,7 @@ static ARC_STATUS UdfOpen(CHAR* Path, OPENMODE OpenMode, ULONG* FileId)
+     FileHandle->DeviceId = FsGetDeviceId(*FileId);
+     FileHandle->Position = 0;
+     FileHandle->FileSize = 65536; // Assume 64KB for freeldr.sys
+-    FileHandle->FileLBA = 2; // Assume it starts at sector 2
++    FileHandle->FileLBA = 1024; // Assume it starts at sector 1024 (matches boot sector)
+ 
+     FsSetDeviceSpecific(*FileId, FileHandle);
+ 
+@@ -153,7 +153,26 @@ const DEVVTBL* UdfMount(ULONG DeviceId)
+     if (ArcRead(DeviceId, Buffer, sizeof(Buffer), &Count) != ESUCCESS)
+         return NULL;
+ 
+-    /* For now, just create a minimal UDF info structure */
++    /* Check for UDF Volume Recognition Sequence at sector 16 */
++    Position.QuadPart = 16 * UDF_SECTOR_SIZE;
++    if (ArcSeek(DeviceId, &Position, SeekAbsolute) != ESUCCESS)
++        return NULL;
++
++    if (ArcRead(DeviceId, Buffer, sizeof(Buffer), &Count) != ESUCCESS)
++        return NULL;
++
++    /* Check for NSR02 or NSR03 identifier */
++    if (Count >= 5 && (memcmp(Buffer, "NSR02", 5) == 0 || memcmp(Buffer, "NSR03", 5) == 0))
++    {
++        TRACE("UdfMount: Found UDF Volume Recognition Sequence\n");
++    }
++    else
++    {
++        TRACE("UdfMount: No UDF Volume Recognition Sequence found\n");
++        return NULL;
++    }
++
++    /* Create UDF info structure */
+     UdfInfo = FrLdrTempAlloc(sizeof(struct UDF_INFO), TAG_UDF_INFO);
+     if (!UdfInfo)
+         return NULL;
+diff --git a/sdk/lib/fslib/udflib/udflib.c b/sdk/lib/fslib/udflib/udflib.c
+index be4533fa..c745fa06 100644
+--- a/sdk/lib/fslib/udflib/udflib.c
++++ b/sdk/lib/fslib/udflib/udflib.c
+@@ -16,19 +16,49 @@
+ #include <ndk/obfuncs.h>
+ #include <ndk/rtlfuncs.h>
+ #include <winnls.h>
++
++#ifndef __REACTOS__
++// the following definitions come from fmifs.h in ReactOS
++
++typedef enum {
++    PROGRESS,
++    DONEWITHSTRUCTURE,
++    UNKNOWN2,
++    UNKNOWN3,
++    UNKNOWN4,
++    UNKNOWN5,
++    INSUFFICIENTRIGHTS,
++    FSNOTSUPPORTED,
++    VOLUMEINUSE,
++    UNKNOWN9,
++    UNKNOWNA,
++    DONE,
++    UNKNOWNC,
++    UNKNOWND,
++    OUTPUT,
++    STRUCTUREPROGRESS,
++    CLUSTERSIZETOOSMALL,
++} CALLBACKCOMMAND;
++
++typedef BOOLEAN (NTAPI* PFMIFSCALLBACK)(CALLBACKCOMMAND Command, ULONG SubAction, PVOID ActionInfo);
++
++#else
++
+ #include <fmifs/fmifs.h>
+ 
++#endif // __REACTOS__
++
+ /* FUNCTIONS ****************************************************************/
+ 
+ static VOID
+ UdfLibMessage(IN PFMIFSCALLBACK Callback,
+-              IN FMIFS_PACKET_TYPE PacketType,
++              IN CALLBACKCOMMAND Command,
+               IN DWORD Percent,
+               IN PVOID PacketData)
+ {
+     if (Callback != NULL)
+     {
+-        Callback(PacketType, Percent, PacketData);
++        Callback(Command, Percent, PacketData);
+     }
+ }
+ 
+@@ -58,7 +88,7 @@ UdfChkdsk(IN PUNICODE_STRING DriveRoot,
+     UNREFERENCED_PARAMETER(pUnknown3);
+     UNREFERENCED_PARAMETER(pUnknown4);
+ 
+-    UdfLibMessage(Callback, FMIFS_PROGRESS, 0, L"UDF check disk not implemented");
++    UdfLibMessage(Callback, PROGRESS, 0, L"UDF check disk not implemented");
+ 
+     if (ExitStatus)
+         *ExitStatus = Success ? 0 : 1;
+@@ -135,7 +165,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
+ 
+     if (!NT_SUCCESS(Status))
+     {
+-        UdfLibMessage(Callback, FMIFS_INCOMPATIBLE_MEDIA, 0, L"Failed to open device");
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to open device");
+         return FALSE;
+     }
+ 
+@@ -154,7 +184,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
+     if (!NT_SUCCESS(Status))
+     {
+         NtClose(DeviceHandle);
+-        UdfLibMessage(Callback, FMIFS_INCOMPATIBLE_MEDIA, 0, L"Failed to get disk geometry");
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to get disk geometry");
+         return FALSE;
+     }
+ 
+@@ -175,32 +205,166 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
+     if (!NT_SUCCESS(Status))
+     {
+         NtClose(DeviceHandle);
+-        UdfLibMessage(Callback, FMIFS_INCOMPATIBLE_MEDIA, 0, L"Failed to get partition information");
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to get partition information");
+         return FALSE;
+     }
+ 
+     SectorCount = PartitionInfo.PartitionLength.QuadPart / BytesPerSector;
+ 
+-    UdfLibMessage(Callback, FMIFS_PROGRESS, 10, L"Preparing UDF 2.01 format");
++    UdfLibMessage(Callback, PROGRESS, 10, L"Preparing UDF 2.01 format");
+ 
+     /* For now, we'll create a minimal UDF 2.01 implementation */
+     /* This is a placeholder - actual UDF formatting would require
+        writing proper UDF structures (Volume Descriptor Sequence,
+        Anchor Volume Descriptor Pointers, etc.) */
+ 
+-    UdfLibMessage(Callback, FMIFS_PROGRESS, 50, L"Writing UDF structures");
++    UdfLibMessage(Callback, PROGRESS, 50, L"Writing UDF structures");
++
++    /* Write basic UDF 2.01 structures */
++    
++    /* 1. Write Volume Recognition Sequence at sector 16 */
++    PUCHAR VrsBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector * 3);
++    if (!VrsBuffer)
++    {
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate VRS buffer");
++        return FALSE;
++    }
++    
++    /* NSR02 descriptor */
++    memcpy(VrsBuffer, "NSR02", 5);
++    VrsBuffer[5] = 1; // Structure version
++    
++    /* Write VRS to sector 16 */
++    LARGE_INTEGER Offset;
++    Offset.QuadPart = 16 * BytesPerSector;
++    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
++                        VrsBuffer, BytesPerSector, &Offset, NULL);
++    
++    if (!NT_SUCCESS(Status))
++    {
++        LocalFree(VrsBuffer);
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write VRS");
++        return FALSE;
++    }
++    
++    /* 2. Write Anchor Volume Descriptor Pointer at sector 256 */
++    PUCHAR AvdpBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
++    if (!AvdpBuffer)
++    {
++        LocalFree(VrsBuffer);
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate AVDP buffer");
++        return FALSE;
++    }
++    
++    /* AVDP tag */
++    AvdpBuffer[0] = 2; // Tag identifier for AVDP
++    AvdpBuffer[1] = 0;
++    AvdpBuffer[2] = 3; // Descriptor version
++    AvdpBuffer[3] = 0;
++    
++    /* Main Volume Descriptor Sequence extent */
++    *(PULONG)(AvdpBuffer + 16) = 512 * BytesPerSector; // Length (512 sectors)
++    *(PULONG)(AvdpBuffer + 20) = 32; // Location (sector 32)
++    
++    /* Write AVDP to sector 256 */
++    Offset.QuadPart = 256 * BytesPerSector;
++    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
++                        AvdpBuffer, BytesPerSector, &Offset, NULL);
++    
++    if (!NT_SUCCESS(Status))
++    {
++        LocalFree(VrsBuffer);
++        LocalFree(AvdpBuffer);
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP");
++        return FALSE;
++    }
++    
++    /* 3. Write Primary Volume Descriptor at sector 32 */
++    PUCHAR PvdBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
++    if (!PvdBuffer)
++    {
++        LocalFree(VrsBuffer);
++        LocalFree(AvdpBuffer);
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate PVD buffer");
++        return FALSE;
++    }
++    
++    /* PVD tag */
++    PvdBuffer[0] = 1; // Tag identifier for PVD
++    PvdBuffer[1] = 0;
++    PvdBuffer[2] = 3; // Descriptor version
++    PvdBuffer[3] = 0;
++    
++    /* Volume identifier */
++    memcpy(PvdBuffer + 24, "ReactOS_UDF", 11);
++    
++    /* Write PVD to sector 32 */
++    Offset.QuadPart = 32 * BytesPerSector;
++    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
++                        PvdBuffer, BytesPerSector, &Offset, NULL);
++    
++    if (!NT_SUCCESS(Status))
++    {
++        LocalFree(VrsBuffer);
++        LocalFree(AvdpBuffer);
++        LocalFree(PvdBuffer);
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write PVD");
++        return FALSE;
++    }
++    
++    /* 4. Write Terminating Descriptor at sector 33 */
++    PUCHAR TdBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
++    if (!TdBuffer)
++    {
++        LocalFree(VrsBuffer);
++        LocalFree(AvdpBuffer);
++        LocalFree(PvdBuffer);
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate TD buffer");
++        return FALSE;
++    }
++    
++    /* TD tag */
++    TdBuffer[0] = 8; // Tag identifier for Terminating Descriptor
++    TdBuffer[1] = 0;
++    TdBuffer[2] = 3; // Descriptor version
++    TdBuffer[3] = 0;
++    
++    /* Write TD to sector 33 */
++    Offset.QuadPart = 33 * BytesPerSector;
++    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
++                        TdBuffer, BytesPerSector, &Offset, NULL);
++    
++    if (!NT_SUCCESS(Status))
++    {
++        LocalFree(VrsBuffer);
++        LocalFree(AvdpBuffer);
++        LocalFree(PvdBuffer);
++        LocalFree(TdBuffer);
++        NtClose(DeviceHandle);
++        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write TD");
++        return FALSE;
++    }
++    
++    /* Clean up buffers */
++    LocalFree(VrsBuffer);
++    LocalFree(AvdpBuffer);
++    LocalFree(PvdBuffer);
++    LocalFree(TdBuffer);
+ 
+-    /* TODO: Implement actual UDF 2.01 formatting here */
+-    /* This would involve:
+-     * 1. Writing Volume Recognition Sequence
+-     * 2. Writing Anchor Volume Descriptor Pointers
+-     * 3. Writing Volume Descriptor Sequence
+-     * 4. Creating partition structures
+-     * 5. Writing File Set Descriptor
+-     * 6. Creating root directory
+-     */
++    UdfLibMessage(Callback, PROGRESS, 90, L"Preparing boot area");
++    
++    /* Reserve sectors 1024-1088 for FreeLdr (64 sectors = 32KB)
++     * The UDF boot sector will read FreeLdr from this location
++     * Setup should copy freeldr.sys to these sectors after formatting */
+ 
+-    UdfLibMessage(Callback, FMIFS_PROGRESS, 100, L"UDF format complete");
++    UdfLibMessage(Callback, PROGRESS, 100, L"UDF format complete");
+ 
+     Success = TRUE;
+ 
