@@ -223,7 +223,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     /* Write basic UDF 2.01 structures */
     
     /* 1. Write Volume Recognition Sequence at sector 16 */
-    PUCHAR VrsBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector * 3);
+    PUCHAR VrsBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector * 3);
     if (!VrsBuffer)
     {
         NtClose(DeviceHandle);
@@ -243,17 +243,17 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     
     if (!NT_SUCCESS(Status))
     {
-        LocalFree(VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write VRS");
         return FALSE;
     }
     
     /* 2. Write Anchor Volume Descriptor Pointer at sector 256 */
-    PUCHAR AvdpBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
+    PUCHAR AvdpBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
     if (!AvdpBuffer)
     {
-        LocalFree(VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate AVDP buffer");
         return FALSE;
@@ -276,19 +276,19 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     
     if (!NT_SUCCESS(Status))
     {
-        LocalFree(VrsBuffer);
-        LocalFree(AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP");
         return FALSE;
     }
     
     /* 3. Write Primary Volume Descriptor at sector 32 */
-    PUCHAR PvdBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
+    PUCHAR PvdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
     if (!PvdBuffer)
     {
-        LocalFree(VrsBuffer);
-        LocalFree(AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate PVD buffer");
         return FALSE;
@@ -310,21 +310,21 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     
     if (!NT_SUCCESS(Status))
     {
-        LocalFree(VrsBuffer);
-        LocalFree(AvdpBuffer);
-        LocalFree(PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write PVD");
         return FALSE;
     }
     
     /* 4. Write Terminating Descriptor at sector 33 */
-    PUCHAR TdBuffer = LocalAlloc(LMEM_ZEROINIT, BytesPerSector);
+    PUCHAR TdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
     if (!TdBuffer)
     {
-        LocalFree(VrsBuffer);
-        LocalFree(AvdpBuffer);
-        LocalFree(PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate TD buffer");
         return FALSE;
@@ -343,20 +343,20 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     
     if (!NT_SUCCESS(Status))
     {
-        LocalFree(VrsBuffer);
-        LocalFree(AvdpBuffer);
-        LocalFree(PvdBuffer);
-        LocalFree(TdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, TdBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write TD");
         return FALSE;
     }
     
     /* Clean up buffers */
-    LocalFree(VrsBuffer);
-    LocalFree(AvdpBuffer);
-    LocalFree(PvdBuffer);
-    LocalFree(TdBuffer);
+    RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+    RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+    RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+    RtlFreeHeap(RtlGetProcessHeap(), 0, TdBuffer);
 
     UdfLibMessage(Callback, PROGRESS, 90, L"Preparing boot area");
     
