@@ -117,7 +117,7 @@ typedef struct _UDF_BOOTSECTOR
     UCHAR JumpBoot[3];
     UCHAR BootDrive;
     ULONGLONG PartitionStartLBA;
-    UCHAR Fill[500]; // 512 - 12
+    UCHAR Fill[498]; // 512 - 14 (3+1+8+2)
     USHORT BootSectorMagic;
 } UDF_BOOTSECTOR, *PUDF_BOOTSECTOR;
 C_ASSERT(sizeof(UDF_BOOTSECTOR) == UDF_BOOTSECTOR_SIZE);
