@@ -942,7 +942,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     *(PUSHORT)(SbdBuffer + 6) = 1; // Tag serial number
     *(PUSHORT)(SbdBuffer + 8) = 0; // Descriptor CRC (calculated)
     *(PUSHORT)(SbdBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
-    *(PULONG)(SbdBuffer + 12) = 83; // Tag location (partition-relative block 83)
+    *(PULONG)(SbdBuffer + 12) = 80 + 83; // Tag location (absolute logical block 163)
     
     /* Number of bits (one bit per logical block in partition) */
     ULONG BitmapBits = PartitionLength;
