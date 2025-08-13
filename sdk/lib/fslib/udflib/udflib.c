@@ -1030,6 +1030,204 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
 
+    /* 9. Create Logical Volume Integrity Descriptor at logical block 128 */
+    PUCHAR LvidBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, LogicalBlockSize);
+    if (!LvidBuffer)
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, LvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, TdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, FsdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate LVID buffer");
+        return FALSE;
+    }
+    
+    /* LVID tag (tag identifier 9) */
+    LvidBuffer[0] = 9; // Tag identifier for Logical Volume Integrity Descriptor
+    LvidBuffer[1] = 0;
+    LvidBuffer[2] = 3; // Descriptor version
+    LvidBuffer[3] = 0;
+    LvidBuffer[4] = 0; // Tag checksum (calculated)
+    LvidBuffer[5] = 0; // Reserved
+    *(PUSHORT)(LvidBuffer + 6) = 1; // Tag serial number
+    *(PUSHORT)(LvidBuffer + 8) = 0; // Descriptor CRC (calculated)
+    *(PUSHORT)(LvidBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
+    *(PULONG)(LvidBuffer + 12) = 128; // Tag location (logical block 128)
+    
+    /* Recording date and time */
+#ifdef __REACTOS__
+    LARGE_INTEGER SystemTime;
+    NtQuerySystemTime(&SystemTime);
+    ULONGLONG UdfTime = SystemTime.QuadPart + 0x19DB1DED53E8000ULL;
+#else
+    SYSTEMTIME st;
+    FILETIME ft;
+    GetSystemTime(&st);
+    SystemTimeToFileTime(&st, &ft);
+    ULONGLONG UdfTime = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    UdfTime += 0x19DB1DED53E8000ULL;
+#endif
+    
+    *(PULONGLONG)(LvidBuffer + 16) = UdfTime; // Recording date and time
+    
+    /* Integrity type (1 = closed, 0 = open) */
+    *(PULONG)(LvidBuffer + 24) = 1; // Closed integrity type
+    
+    /* Next unique ID (start at 16) */
+    *(PULONGLONG)(LvidBuffer + 28) = 16;
+    
+    /* Logical volume contents use (CS0) */
+    LvidBuffer[36] = 0;
+    memcpy(LvidBuffer + 37, "OSTA Compressed Unicode", 23);
+    
+    /* Number of partitions */
+    *(PULONG)(LvidBuffer + 72) = 1;
+    
+    /* Length of implementation use */
+    *(PULONG)(LvidBuffer + 76) = 46; // 32 bytes for impl ID + 8 for number of files/dirs + 6 for minimum UDF read/write
+    
+    /* Free space table (one entry per partition) */
+    ULONG FreeBlocks = PartitionLength - 10; // Total blocks minus allocated blocks
+    *(PULONG)(LvidBuffer + 80) = FreeBlocks;
+    
+    /* Size table (one entry per partition) */
+    *(PULONG)(LvidBuffer + 84) = PartitionLength;
+    
+    /* Implementation use area */
+    /* Implementation identifier */
+    memcpy(LvidBuffer + 88, "*ReactOS UDF", 12);
+    *(PUSHORT)(LvidBuffer + 112) = 0x0201; // UDF revision 2.01
+    
+    /* Number of files */
+    *(PULONG)(LvidBuffer + 120) = 1; // Just root directory
+    
+    /* Number of directories */
+    *(PULONG)(LvidBuffer + 124) = 1; // Just root directory
+    
+    /* Minimum UDF read revision */
+    *(PUSHORT)(LvidBuffer + 128) = 0x0102; // UDF 1.02
+    
+    /* Minimum UDF write revision */
+    *(PUSHORT)(LvidBuffer + 130) = 0x0102; // UDF 1.02
+    
+    /* Maximum UDF write revision */
+    *(PUSHORT)(LvidBuffer + 132) = 0x0201; // UDF 2.01
+    
+    /* Calculate and set tag checksum */
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += LvidBuffer[i] + LvidBuffer[i+1] + LvidBuffer[i+2] + LvidBuffer[i+3];
+    }
+    LvidBuffer[4] = (UCHAR)(256 - checksum);
+    
+    /* Write LVID to logical block 128 */
+    Offset.QuadPart = 128 * LogicalBlockSize;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        LvidBuffer, LogicalBlockSize, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, LvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, TdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, FsdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, LvidBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write LVID");
+        return FALSE;
+    }
+
+    /* 10. Write Reserve Volume Descriptor Sequence (backup VDS) */
+    /* Calculate backup VDS location from AVDP */
+    ULONG BackupVdsLocation;
+    if (TotalLogicalBlocks > 257)
+        BackupVdsLocation = (ULONG)(TotalLogicalBlocks - 257);
+    else
+        BackupVdsLocation = 32; // Same as main for small volumes
+    
+    /* Write backup copies of all VDS descriptors */
+    
+    /* Backup PVD */
+    *(PULONG)(PvdBuffer + 12) = BackupVdsLocation; // Update tag location
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += PvdBuffer[i] + PvdBuffer[i+1] + PvdBuffer[i+2] + PvdBuffer[i+3];
+    }
+    PvdBuffer[4] = (UCHAR)(256 - checksum);
+    
+    Offset.QuadPart = BackupVdsLocation * LogicalBlockSize;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        PvdBuffer, LogicalBlockSize, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("UdfFormat: Warning - Failed to write backup PVD (Status: 0x%08x)\n", Status);
+    }
+    
+    /* Backup PD */
+    *(PULONG)(PdBuffer + 12) = BackupVdsLocation + 1; // Update tag location
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += PdBuffer[i] + PdBuffer[i+1] + PdBuffer[i+2] + PdBuffer[i+3];
+    }
+    PdBuffer[4] = (UCHAR)(256 - checksum);
+    
+    Offset.QuadPart = (BackupVdsLocation + 1) * LogicalBlockSize;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        PdBuffer, LogicalBlockSize, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("UdfFormat: Warning - Failed to write backup PD (Status: 0x%08x)\n", Status);
+    }
+    
+    /* Backup LVD */
+    *(PULONG)(LvdBuffer + 12) = BackupVdsLocation + 2; // Update tag location
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += LvdBuffer[i] + LvdBuffer[i+1] + LvdBuffer[i+2] + LvdBuffer[i+3];
+    }
+    LvdBuffer[4] = (UCHAR)(256 - checksum);
+    
+    Offset.QuadPart = (BackupVdsLocation + 2) * LogicalBlockSize;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        LvdBuffer, LogicalBlockSize, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("UdfFormat: Warning - Failed to write backup LVD (Status: 0x%08x)\n", Status);
+    }
+    
+    /* Backup TD */
+    *(PULONG)(TdBuffer + 12) = BackupVdsLocation + 3; // Update tag location
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += TdBuffer[i] + TdBuffer[i+1] + TdBuffer[i+2] + TdBuffer[i+3];
+    }
+    TdBuffer[4] = (UCHAR)(256 - checksum);
+    
+    Offset.QuadPart = (BackupVdsLocation + 3) * LogicalBlockSize;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        TdBuffer, LogicalBlockSize, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("UdfFormat: Warning - Failed to write backup TD (Status: 0x%08x)\n", Status);
+    }
+
     /* Clean up buffers */
     RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
@@ -1041,6 +1239,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
+    RtlFreeHeap(RtlGetProcessHeap(), 0, LvidBuffer);
 
     UdfLibMessage(Callback, PROGRESS, 90, L"Preparing boot area");
     
