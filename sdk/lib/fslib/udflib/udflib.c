@@ -152,7 +152,11 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     UNREFERENCED_PARAMETER(Label);
     UNREFERENCED_PARAMETER(ClusterSize);
 
+    /* Debug: Log entry into UdfFormat function */
+    UdfLibMessage(Callback, PROGRESS, 0, L"UdfFormat: Starting UDF formatting process");
+
     /* Open the drive */
+    UdfLibMessage(Callback, PROGRESS, 1, L"UdfFormat: Opening device for formatting");
     InitializeObjectAttributes(&ObjectAttributes,
                                DriveRoot,
                                OBJ_CASE_INSENSITIVE,
@@ -171,6 +175,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to open device");
         return FALSE;
     }
+
+    UdfLibMessage(Callback, PROGRESS, 2, L"UdfFormat: Device opened successfully");
 
     /* Lock the volume for exclusive access during formatting */
     Status = NtFsControlFile(DeviceHandle,
