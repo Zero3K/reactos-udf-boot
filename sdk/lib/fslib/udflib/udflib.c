@@ -51,6 +51,9 @@ typedef BOOLEAN (NTAPI* PFMIFSCALLBACK)(CALLBACKCOMMAND Command, ULONG SubAction
 
 #endif // __REACTOS__
 
+#define NDEBUG
+#include <debug.h>
+
 /* FUNCTIONS ****************************************************************/
 
 static VOID
@@ -153,10 +156,10 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     UNREFERENCED_PARAMETER(ClusterSize);
 
     /* Debug: Log entry into UdfFormat function */
-    UdfLibMessage(Callback, PROGRESS, 0, L"UdfFormat: Starting UDF formatting process");
+    DPRINT("UdfFormat: Starting UDF formatting process for drive '%wZ'\n", DriveRoot);
 
     /* Open the drive */
-    UdfLibMessage(Callback, PROGRESS, 1, L"UdfFormat: Opening device for formatting");
+    DPRINT("UdfFormat: Opening device for formatting\n");
     InitializeObjectAttributes(&ObjectAttributes,
                                DriveRoot,
                                OBJ_CASE_INSENSITIVE,
@@ -172,11 +175,11 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     if (!NT_SUCCESS(Status))
     {
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to open device");
+        DPRINT1("UdfFormat: Failed to open device (Status: 0x%08x)\n", Status);
         return FALSE;
     }
 
-    UdfLibMessage(Callback, PROGRESS, 2, L"UdfFormat: Device opened successfully");
+    DPRINT("UdfFormat: Device opened successfully\n");
 
     /* Lock the volume for exclusive access during formatting */
     Status = NtFsControlFile(DeviceHandle,
@@ -192,10 +195,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     if (!NT_SUCCESS(Status))
     {
+        DPRINT1("UdfFormat: Failed to lock volume for formatting (Status: 0x%08x)\n", Status);
         NtClose(DeviceHandle);
-        WCHAR ErrorMsg[256];
-        swprintf(ErrorMsg, L"Failed to lock volume for formatting (Status: 0x%08x)", Status);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, ErrorMsg);
         return FALSE;
     }
 
@@ -213,11 +214,12 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     if (!NT_SUCCESS(Status))
     {
+        DPRINT1("UdfFormat: Failed to get disk geometry (Status: 0x%08x)\n", Status);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to get disk geometry");
         return FALSE;
     }
 
+    DPRINT("UdfFormat: Got disk geometry - BytesPerSector: %lu\n", DiskGeometry.BytesPerSector);
     BytesPerSector = DiskGeometry.BytesPerSector;
 
     /* Get partition information */
@@ -234,12 +236,13 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     if (!NT_SUCCESS(Status))
     {
+        DPRINT1("UdfFormat: Failed to get partition information (Status: 0x%08x)\n", Status);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to get partition information");
         return FALSE;
     }
 
     SectorCount = PartitionInfo.PartitionLength.QuadPart / BytesPerSector;
+    DPRINT("UdfFormat: Partition size - SectorCount: %I64u, BytesPerSector: %lu\n", SectorCount, BytesPerSector);
 
     UdfLibMessage(Callback, PROGRESS, 10, L"Preparing UDF 2.01 format");
 
@@ -1013,7 +1016,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     UdfLibMessage(Callback, PROGRESS, 100, L"UDF format complete");
 
     /* Unlock the volume */
-    NtFsControlFile(DeviceHandle,
+    Status = NtFsControlFile(DeviceHandle,
                    NULL,
                    NULL,
                    NULL,
@@ -1024,7 +1027,13 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
                    NULL,
                    0);
 
+    if (!NT_SUCCESS(Status))
+    {
+        DPRINT1("UdfFormat: Failed to unlock volume (Status: 0x%08x)\n", Status);
+    }
+
     Success = TRUE;
+    DPRINT("UdfFormat: Successfully completed UDF formatting\n");
 
     NtClose(DeviceHandle);
 
@@ -1047,5 +1056,7 @@ UdfFormatEx(IN PUNICODE_STRING DriveRoot,
                      BackwardCompatible,
                      MediaType,
                      Label,
+                     ClusterSize);
+}                    Label,
                      ClusterSize);
 }
