@@ -229,9 +229,20 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
             break;
 
         default:
-            Status = STATUS_INVALID_PARAMETER;
-            UDFCompleteRequest(IrpContext, Irp, Status);
-            break;
+            // Pass through unrecognized IOCTLs to the underlying device
+            // This is needed for formatting operations that send disk IOCTLs
+            IoSkipCurrentIrpStackLocation(Irp);
+            Status = IoCallDriver(Vcb->TargetDeviceObject, Irp);
+            
+            if (DeviceAcquired)
+                UDFReleaseDevice(IrpContext, Vcb, NULL);
+
+            if (FcbAcquired) {
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
+            }
+            
+            return Status;
         }
 
         if (DeviceAcquired)
