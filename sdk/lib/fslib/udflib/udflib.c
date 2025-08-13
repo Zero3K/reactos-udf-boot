@@ -13,6 +13,7 @@
 #include <windef.h>
 #include <winbase.h>
 #include <ndk/iofuncs.h>
+#include <ndk/kefuncs.h>
 #include <ndk/obfuncs.h>
 #include <ndk/rtlfuncs.h>
 #include <winnls.h>
