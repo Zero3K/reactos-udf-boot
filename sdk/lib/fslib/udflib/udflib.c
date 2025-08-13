@@ -260,8 +260,12 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* 2. Write Anchor Volume Descriptor Pointer at sector 256 */
-    PUCHAR AvdpBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
+    /* 2. Write Anchor Volume Descriptor Pointers at logical blocks 100 and 200 */
+    /* UDF uses 2048-byte logical blocks, so convert to 512-byte sectors */
+    ULONG LogicalBlockSize = 2048;
+    ULONG BlocksPerSector = LogicalBlockSize / BytesPerSector;
+    
+    PUCHAR AvdpBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, LogicalBlockSize);
     if (!AvdpBuffer)
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
@@ -270,7 +274,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* AVDP tag (tag identifier 2, descriptor version 3, tag checksum, reserved, tag serial number, descriptor CRC, descriptor CRC length, tag location) */
+    /* Write AVDP at logical block 100 */
+    /* AVDP tag (tag identifier 2, descriptor version 3) */
     AvdpBuffer[0] = 2; // Tag identifier for AVDP
     AvdpBuffer[1] = 0;
     AvdpBuffer[2] = 3; // Descriptor version  
@@ -279,16 +284,16 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     AvdpBuffer[5] = 0; // Reserved
     *(PUSHORT)(AvdpBuffer + 6) = 1; // Tag serial number
     *(PUSHORT)(AvdpBuffer + 8) = 0; // Descriptor CRC (calculated)
-    *(PUSHORT)(AvdpBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
-    *(PULONG)(AvdpBuffer + 12) = 256; // Tag location
+    *(PUSHORT)(AvdpBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
+    *(PULONG)(AvdpBuffer + 12) = 100; // Tag location (logical block 100)
     
-    /* Main Volume Descriptor Sequence extent (length, location) */
-    *(PULONG)(AvdpBuffer + 16) = 32 * BytesPerSector; // Length (32 sectors)
-    *(PULONG)(AvdpBuffer + 20) = 32; // Location (sector 32)
+    /* Main Volume Descriptor Sequence extent (length in bytes, location in logical blocks) */
+    *(PULONG)(AvdpBuffer + 16) = 32 * LogicalBlockSize; // Length (32 logical blocks)
+    *(PULONG)(AvdpBuffer + 20) = 32; // Location (logical block 32)
     
     /* Reserve Volume Descriptor Sequence extent (copy of main) */
-    *(PULONG)(AvdpBuffer + 24) = 32 * BytesPerSector; // Length
-    *(PULONG)(AvdpBuffer + 28) = 64; // Location (sector 64)
+    *(PULONG)(AvdpBuffer + 24) = 32 * LogicalBlockSize; // Length
+    *(PULONG)(AvdpBuffer + 28) = 64; // Location (logical block 64)
     
     /* Calculate and set tag checksum */
     UCHAR checksum = 0;
@@ -297,22 +302,46 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     AvdpBuffer[4] = (UCHAR)(256 - checksum);
     
-    /* Write AVDP to sector 256 */
-    Offset.QuadPart = 256 * BytesPerSector;
+    /* Write AVDP to logical block 100 (sector 400 if 2048-byte blocks) */
+    Offset.QuadPart = (100 * LogicalBlockSize);
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
-                        AvdpBuffer, BytesPerSector, &Offset, NULL);
+                        AvdpBuffer, LogicalBlockSize, &Offset, NULL);
     
     if (!NT_SUCCESS(Status))
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP");
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP at block 100");
         return FALSE;
     }
     
-    /* 3. Write Primary Volume Descriptor at sector 32 */
-    PUCHAR PvdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
+    /* Write second AVDP at logical block 200 */
+    *(PULONG)(AvdpBuffer + 12) = 200; // Tag location (logical block 200)
+    
+    /* Recalculate tag checksum for new location */
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += AvdpBuffer[i] + AvdpBuffer[i+1] + AvdpBuffer[i+2] + AvdpBuffer[i+3];
+    }
+    AvdpBuffer[4] = (UCHAR)(256 - checksum);
+    
+    /* Write AVDP to logical block 200 (sector 800 if 2048-byte blocks) */
+    Offset.QuadPart = (200 * LogicalBlockSize);
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        AvdpBuffer, LogicalBlockSize, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP at block 200");
+        return FALSE;
+    }
+    
+    /* 3. Write Primary Volume Descriptor at logical block 32 */
+    PUCHAR PvdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, LogicalBlockSize);
     if (!PvdBuffer)
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
@@ -331,8 +360,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     PvdBuffer[5] = 0; // Reserved
     *(PUSHORT)(PvdBuffer + 6) = 1; // Tag serial number
     *(PUSHORT)(PvdBuffer + 8) = 0; // Descriptor CRC (calculated)
-    *(PUSHORT)(PvdBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
-    *(PULONG)(PvdBuffer + 12) = 32; // Tag location
+    *(PUSHORT)(PvdBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
+    *(PULONG)(PvdBuffer + 12) = 32; // Tag location (logical block 32)
     
     /* Volume Descriptor Sequence Number */
     *(PULONG)(PvdBuffer + 16) = 1;
@@ -373,10 +402,10 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     PvdBuffer[4] = (UCHAR)(256 - checksum);
     
-    /* Write PVD to sector 32 */
-    Offset.QuadPart = 32 * BytesPerSector;
+    /* Write PVD to logical block 32 */
+    Offset.QuadPart = 32 * LogicalBlockSize;
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
-                        PvdBuffer, BytesPerSector, &Offset, NULL);
+                        PvdBuffer, LogicalBlockSize, &Offset, NULL);
     
     if (!NT_SUCCESS(Status))
     {
@@ -388,8 +417,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* 4. Write Logical Volume Descriptor at sector 33 */
-    PUCHAR LvdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
+    /* 4. Write Logical Volume Descriptor at logical block 33 */
+    PUCHAR LvdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, LogicalBlockSize);
     if (!LvdBuffer)
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
@@ -409,8 +438,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     LvdBuffer[5] = 0; // Reserved
     *(PUSHORT)(LvdBuffer + 6) = 1; // Tag serial number
     *(PUSHORT)(LvdBuffer + 8) = 0; // Descriptor CRC (calculated)
-    *(PUSHORT)(LvdBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
-    *(PULONG)(LvdBuffer + 12) = 33; // Tag location
+    *(PUSHORT)(LvdBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
+    *(PULONG)(LvdBuffer + 12) = 33; // Tag location (logical block 33)
     
     /* Volume Descriptor Sequence Number */
     *(PULONG)(LvdBuffer + 16) = 2;
@@ -420,7 +449,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     memcpy(LvdBuffer + 85, "ReactOS_UDF", 11);
     
     /* Logical block size */
-    *(PULONG)(LvdBuffer + 212) = BytesPerSector;
+    *(PULONG)(LvdBuffer + 212) = LogicalBlockSize;
     
     /* Calculate and set tag checksum */
     checksum = 0;
@@ -429,10 +458,10 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     LvdBuffer[4] = (UCHAR)(256 - checksum);
     
-    /* Write LVD to sector 33 */
-    Offset.QuadPart = 33 * BytesPerSector;
+    /* Write LVD to logical block 33 */
+    Offset.QuadPart = 33 * LogicalBlockSize;
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
-                        LvdBuffer, BytesPerSector, &Offset, NULL);
+                        LvdBuffer, LogicalBlockSize, &Offset, NULL);
     
     if (!NT_SUCCESS(Status))
     {
@@ -445,8 +474,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* 5. Write Terminating Descriptor at sector 34 */
-    PUCHAR TdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
+    /* 5. Write Terminating Descriptor at logical block 34 */
+    PUCHAR TdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, LogicalBlockSize);
     if (!TdBuffer)
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
@@ -467,8 +496,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     TdBuffer[5] = 0; // Reserved
     *(PUSHORT)(TdBuffer + 6) = 1; // Tag serial number
     *(PUSHORT)(TdBuffer + 8) = 0; // Descriptor CRC (calculated)
-    *(PUSHORT)(TdBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
-    *(PULONG)(TdBuffer + 12) = 34; // Tag location
+    *(PUSHORT)(TdBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
+    *(PULONG)(TdBuffer + 12) = 34; // Tag location (logical block 34)
     
     /* Volume Descriptor Sequence Number */
     *(PULONG)(TdBuffer + 16) = 3;
@@ -480,10 +509,10 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     TdBuffer[4] = (UCHAR)(256 - checksum);
     
-    /* Write TD to sector 34 */
-    Offset.QuadPart = 34 * BytesPerSector;
+    /* Write TD to logical block 34 */
+    Offset.QuadPart = 34 * LogicalBlockSize;
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
-                        TdBuffer, BytesPerSector, &Offset, NULL);
+                        TdBuffer, LogicalBlockSize, &Offset, NULL);
     
     if (!NT_SUCCESS(Status))
     {
@@ -508,7 +537,18 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     
     /* Reserve sectors 1024-1088 for FreeLdr (64 sectors = 32KB)
      * The UDF boot sector will read FreeLdr from this location
-     * Setup should copy freeldr.sys to these sectors after formatting */
+     * Setup should copy freeldr.sys to these sectors after formatting
+     * 
+     * UDF Layout:
+     * - Sector 0: UDF boot sector  
+     * - Sectors 16-18: Volume Recognition Sequence (BEA01/NSR02/TEA01)
+     * - Logical Block 32 (Sector 131072/2048=64): Primary Volume Descriptor
+     * - Logical Block 33 (Sector 135168/2048=66): Logical Volume Descriptor  
+     * - Logical Block 34 (Sector 139264/2048=68): Terminating Descriptor
+     * - Logical Block 100 (Sector 204800): Anchor Volume Descriptor Pointer #1
+     * - Logical Block 200 (Sector 409600): Anchor Volume Descriptor Pointer #2
+     * - Sector 1024: FreeLdr boot location
+     */
 
     UdfLibMessage(Callback, PROGRESS, 100, L"UDF format complete");
 
