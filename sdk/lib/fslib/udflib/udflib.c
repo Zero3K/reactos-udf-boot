@@ -1057,6 +1057,4 @@ UdfFormatEx(IN PUNICODE_STRING DriveRoot,
                      MediaType,
                      Label,
                      ClusterSize);
-}                    Label,
-                     ClusterSize);
 }
