@@ -1047,19 +1047,28 @@ UDFLockVolume(
     //  currently using the volume, or a file on the volume).
     IoAcquireVpbSpinLock( &SavedIrql );
 
+    UDFPrint(("UDFLockVolume: VPB flags=0x%x, VcbRef=%d, VpbRefCount=%d\n", 
+              Vcb->Vpb->Flags, Vcb->VcbReference, Vcb->Vpb->ReferenceCount));
+
+    // Use more permissive reference count check similar to VFAT driver
+    // Allow reference count <= 3 (2 + 1 for the current file object)
     if (!(Vcb->Vpb->Flags & VPB_LOCKED) &&
         (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE+1) &&
-        (Vcb->Vpb->ReferenceCount == 2)) {
+        (Vcb->Vpb->ReferenceCount <= 3)) {
 
         // Mark volume as locked
         Vcb->Vpb->Flags |= VPB_LOCKED;
         Vcb->VcbState |= VCB_STATE_LOCKED;
         Vcb->VolumeLockFileObject = IrpSp->FileObject;
 
+        UDFPrint(("UDFLockVolume: Volume locked successfully\n"));
         RC = STATUS_SUCCESS;
 
     } else {
 
+        UDFPrint(("UDFLockVolume: Lock failed - VPB locked=%s, VcbRef=%d, VpbRefCount=%d\n",
+                  (Vcb->Vpb->Flags & VPB_LOCKED) ? "YES" : "NO",
+                  Vcb->VcbReference, Vcb->Vpb->ReferenceCount));
         RC = STATUS_ACCESS_DENIED;
     }
 
