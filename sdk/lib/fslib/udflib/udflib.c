@@ -915,7 +915,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* 8. Create Space Bitmap Descriptor for proper space allocation management */
+    /* 8. Create Space Bitmap Descriptor with embedded bitmap data */
     PUCHAR SbdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, LogicalBlockSize);
     if (!SbdBuffer)
     {
@@ -948,14 +948,11 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     ULONG BitmapBits = PartitionLength;
     *(PULONG)(SbdBuffer + 16) = BitmapBits;
     
-    /* Number of bytes for bitmap */
+    /* Number of bytes for bitmap - must fit in remaining space after descriptor header */
+    ULONG MaxBitmapBytes = LogicalBlockSize - 25; // 24 bytes for header + 1 byte for startOfBitmap
     ULONG BitmapBytes = (BitmapBits + 7) / 8; // Round up to nearest byte
-    *(PULONG)(SbdBuffer + 20) = BitmapBytes;
     
-    /* Allocate separate buffer for the actual bitmap data */
-    ULONG BitmapBufferSize = ((BitmapBytes + LogicalBlockSize - 1) / LogicalBlockSize) * LogicalBlockSize; // Round up to logical block boundary
-    PUCHAR BitmapBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BitmapBufferSize);
-    if (!BitmapBuffer)
+    if (BitmapBytes > MaxBitmapBytes)
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
@@ -967,15 +964,23 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate bitmap data buffer");
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Bitmap too large to embed in descriptor");
         return FALSE;
     }
+    
+    *(PULONG)(SbdBuffer + 20) = BitmapBytes;
+    
+    /* startOfBitmap field (always 0 for embedded bitmap) */
+    SbdBuffer[24] = 0;
+    
+    /* Embed bitmap data directly after the startOfBitmap field */
+    PUCHAR BitmapData = SbdBuffer + 25; // Start right after startOfBitmap
     
     /* Initialize bitmap - in UDF, bit 0 = allocated, bit 1 = free */
     /* Initialize all bits to 1 (free) */
     for (ULONG i = 0; i < BitmapBytes; i++)
     {
-        BitmapBuffer[i] = 0xFF;
+        BitmapData[i] = 0xFF;
     }
     
     /* Mark first 10 blocks as allocated by clearing bits (0 = allocated) */
@@ -984,7 +989,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         ULONG byteIndex = i / 8;
         ULONG bitIndex = i % 8;
         if (byteIndex < BitmapBytes)
-            BitmapBuffer[byteIndex] &= ~(1 << bitIndex);
+            BitmapData[byteIndex] &= ~(1 << bitIndex);
     }
     
     /* Calculate and set tag checksum */
@@ -994,7 +999,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     SbdBuffer[4] = (UCHAR)(256 - checksum);
     
-    /* Write Space Bitmap Descriptor to logical block 163 (80 + 83 = absolute block) */
+    /* Write Space Bitmap Descriptor with embedded bitmap to logical block 163 (80 + 83 = absolute block) */
     Offset.QuadPart = (80 + 83) * LogicalBlockSize;
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
                         SbdBuffer, LogicalBlockSize, &Offset, NULL);
@@ -1010,31 +1015,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, FsdBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write Space Bitmap Descriptor");
-        return FALSE;
-    }
-    
-    /* Write the actual bitmap data to logical block 164 (80 + 84 = absolute block) */
-    Offset.QuadPart = (80 + 84) * LogicalBlockSize;
-    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
-                        BitmapBuffer, BitmapBufferSize, &Offset, NULL);
-    
-    if (!NT_SUCCESS(Status))
-    {
-        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, PdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, LvdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, TdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, FsdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
-        NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write Space Bitmap data");
         return FALSE;
     }
 
@@ -1051,7 +1033,6 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, FsdBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate LVID buffer");
         return FALSE;
@@ -1138,7 +1119,6 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, FsdBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
-        RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, LvidBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write LVID");
@@ -1233,7 +1213,6 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     RtlFreeHeap(RtlGetProcessHeap(), 0, FsdBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, RootDirBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, SbdBuffer);
-    RtlFreeHeap(RtlGetProcessHeap(), 0, BitmapBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, LvidBuffer);
 
     UdfLibMessage(Callback, PROGRESS, 90, L"Preparing boot area");
