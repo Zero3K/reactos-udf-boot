@@ -12,6 +12,7 @@
 #define WIN32_NO_STATUS
 #include <windef.h>
 #include <winbase.h>
+#include <winioctl.h>
 #include <ndk/iofuncs.h>
 #include <ndk/kefuncs.h>
 #include <ndk/obfuncs.h>
@@ -170,6 +171,27 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
 
+    /* Lock the volume for exclusive access during formatting */
+    Status = NtFsControlFile(DeviceHandle,
+                            NULL,
+                            NULL,
+                            NULL,
+                            &IoStatusBlock,
+                            FSCTL_LOCK_VOLUME,
+                            NULL,
+                            0,
+                            NULL,
+                            0);
+
+    if (!NT_SUCCESS(Status))
+    {
+        NtClose(DeviceHandle);
+        WCHAR ErrorMsg[256];
+        swprintf(ErrorMsg, L"Failed to lock volume for formatting (Status: 0x%08x)", Status);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, ErrorMsg);
+        return FALSE;
+    }
+
     /* Get disk geometry */
     Status = NtDeviceIoControlFile(DeviceHandle,
                                    NULL,
@@ -264,7 +286,9 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write VRS");
+        WCHAR ErrorMsg[256];
+        swprintf(ErrorMsg, L"Failed to write VRS (Status: 0x%08x)", Status);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, ErrorMsg);
         return FALSE;
     }
     
@@ -338,7 +362,9 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP at first location");
+        WCHAR ErrorMsg[256];
+        swprintf(ErrorMsg, L"Failed to write AVDP at block %u (Status: 0x%08x)", AvdpBlock1, Status);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, ErrorMsg);
         return FALSE;
     }
     
@@ -978,6 +1004,18 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
      */
 
     UdfLibMessage(Callback, PROGRESS, 100, L"UDF format complete");
+
+    /* Unlock the volume */
+    NtFsControlFile(DeviceHandle,
+                   NULL,
+                   NULL,
+                   NULL,
+                   &IoStatusBlock,
+                   FSCTL_UNLOCK_VOLUME,
+                   NULL,
+                   0,
+                   NULL,
+                   0);
 
     Success = TRUE;
 
