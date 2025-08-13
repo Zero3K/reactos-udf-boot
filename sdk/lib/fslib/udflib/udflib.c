@@ -222,7 +222,6 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     /* Write proper UDF 2.01 structures */
     LARGE_INTEGER Offset;
-    ULONG BytesWritten;
     
     /* 1. Write Volume Recognition Sequence at sector 16 */
     PUCHAR VrsBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector * 3);
