@@ -148,6 +148,16 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     ULONGLONG SectorCount;
     ULONG BytesPerSector;
     BOOLEAN Success = FALSE;
+    
+    /* Variables for UDF timestamp generation */
+#ifdef __REACTOS__
+    LARGE_INTEGER SystemTime;
+    ULONGLONG UdfTime;
+#else
+    SYSTEMTIME st;
+    FILETIME ft;
+    ULONGLONG UdfTime;
+#endif
 
     UNREFERENCED_PARAMETER(QuickFormat);
     UNREFERENCED_PARAMETER(BackwardCompatible);
@@ -852,21 +862,19 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     *(PULONG)(RootDirBuffer + 96) = 0; // Group ID
     
     /* Access time, modification time, creation time (current time) */
+    /* Generate UDF timestamp */
 #ifdef __REACTOS__
-    LARGE_INTEGER SystemTime;
     NtQuerySystemTime(&SystemTime);
     // UDF uses timestamps with 100ns precision since 1900
     // Windows timestamps are 100ns since 1601, so add the difference
-    ULONGLONG UdfTime = SystemTime.QuadPart + 0x19DB1DED53E8000ULL;
+    UdfTime = SystemTime.QuadPart + 0x19DB1DED53E8000ULL;
 #else
-    SYSTEMTIME st;
-    FILETIME ft;
     GetSystemTime(&st);
     SystemTimeToFileTime(&st, &ft);
     
     // Convert to UDF timestamp format (100ns since 1900)
     // Windows FILETIME is 100ns since 1601, so add the difference  
-    ULONGLONG UdfTime = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    UdfTime = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
     UdfTime += 0x19DB1DED53E8000ULL; // Add difference between 1601 and 1900
 #endif
     
@@ -1061,20 +1069,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     *(PUSHORT)(LvidBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
     *(PULONG)(LvidBuffer + 12) = 128; // Tag location (logical block 128)
     
-    /* Recording date and time */
-#ifdef __REACTOS__
-    LARGE_INTEGER SystemTime;
-    NtQuerySystemTime(&SystemTime);
-    ULONGLONG UdfTime = SystemTime.QuadPart + 0x19DB1DED53E8000ULL;
-#else
-    SYSTEMTIME st;
-    FILETIME ft;
-    GetSystemTime(&st);
-    SystemTimeToFileTime(&st, &ft);
-    ULONGLONG UdfTime = ((ULONGLONG)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
-    UdfTime += 0x19DB1DED53E8000ULL;
-#endif
-    
+    /* Recording date and time (reuse existing timestamp) */
     *(PULONGLONG)(LvidBuffer + 16) = UdfTime; // Recording date and time
     
     /* Integrity type (1 = closed, 0 = open) */
