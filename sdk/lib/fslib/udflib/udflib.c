@@ -260,7 +260,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* 2. Write Anchor Volume Descriptor Pointers at logical blocks 100 and 200 */
+    /* 2. Write Anchor Volume Descriptor Pointers at logical blocks 256 and 512 */
     /* UDF uses 2048-byte logical blocks */
     ULONG LogicalBlockSize = 2048;
     
@@ -273,7 +273,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* Write AVDP at logical block 100 */
+    /* Write AVDP at logical block 256 */
     /* AVDP tag (tag identifier 2, descriptor version 3) */
     AvdpBuffer[0] = 2; // Tag identifier for AVDP
     AvdpBuffer[1] = 0;
@@ -284,7 +284,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     *(PUSHORT)(AvdpBuffer + 6) = 1; // Tag serial number
     *(PUSHORT)(AvdpBuffer + 8) = 0; // Descriptor CRC (calculated)
     *(PUSHORT)(AvdpBuffer + 10) = LogicalBlockSize - 16; // Descriptor CRC length
-    *(PULONG)(AvdpBuffer + 12) = 100; // Tag location (logical block 100)
+    *(PULONG)(AvdpBuffer + 12) = 256; // Tag location (logical block 256)
     
     /* Main Volume Descriptor Sequence extent (length in bytes, location in logical blocks) */
     *(PULONG)(AvdpBuffer + 16) = 32 * LogicalBlockSize; // Length (32 logical blocks)
@@ -301,8 +301,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     AvdpBuffer[4] = (UCHAR)(256 - checksum);
     
-    /* Write AVDP to logical block 100 (sector 400 if 2048-byte blocks) */
-    Offset.QuadPart = (100 * LogicalBlockSize);
+    /* Write AVDP to logical block 256 (sector 512 if 2048-byte blocks) */
+    Offset.QuadPart = (256 * LogicalBlockSize);
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
                         AvdpBuffer, LogicalBlockSize, &Offset, NULL);
     
@@ -311,12 +311,12 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP at block 100");
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP at block 256");
         return FALSE;
     }
     
-    /* Write second AVDP at logical block 200 */
-    *(PULONG)(AvdpBuffer + 12) = 200; // Tag location (logical block 200)
+    /* Write second AVDP at logical block 512 */
+    *(PULONG)(AvdpBuffer + 12) = 512; // Tag location (logical block 512)
     
     /* Recalculate tag checksum for new location */
     checksum = 0;
@@ -325,8 +325,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     AvdpBuffer[4] = (UCHAR)(256 - checksum);
     
-    /* Write AVDP to logical block 200 (sector 800 if 2048-byte blocks) */
-    Offset.QuadPart = (200 * LogicalBlockSize);
+    /* Write AVDP to logical block 512 (sector 1024 if 2048-byte blocks) */
+    Offset.QuadPart = (512 * LogicalBlockSize);
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
                         AvdpBuffer, LogicalBlockSize, &Offset, NULL);
     
@@ -335,7 +335,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         NtClose(DeviceHandle);
-        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP at block 200");
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write AVDP at block 512");
         return FALSE;
     }
     
