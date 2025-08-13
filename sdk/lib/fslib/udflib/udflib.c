@@ -942,16 +942,22 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     ULONG BitmapBytes = (BitmapBits + 7) / 8; // Round up to nearest byte
     *(PULONG)(SbdBuffer + 20) = BitmapBytes;
     
-    /* Initialize bitmap - mark first few blocks as used (metadata area) */
+    /* Initialize bitmap - in UDF, bit 0 = allocated, bit 1 = free */
     PUCHAR Bitmap = SbdBuffer + 24;
     
-    /* Mark first 10 blocks as used (FSD, root dir, space bitmap, etc.) */
+    /* Initialize all bits to 1 (free) */
+    for (ULONG i = 0; i < BitmapBytes; i++)
+    {
+        Bitmap[i] = 0xFF;
+    }
+    
+    /* Mark first 10 blocks as allocated by clearing bits (0 = allocated) */
     for (ULONG i = 0; i < 10 && i < BitmapBits; i++)
     {
         ULONG byteIndex = i / 8;
         ULONG bitIndex = i % 8;
         if (byteIndex < BitmapBytes)
-            Bitmap[byteIndex] |= (1 << bitIndex);
+            Bitmap[byteIndex] &= ~(1 << bitIndex);
     }
     
     /* Calculate and set tag checksum */
