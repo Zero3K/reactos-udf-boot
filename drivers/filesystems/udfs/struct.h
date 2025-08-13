@@ -700,8 +700,8 @@ struct VCB {
 
 using PVCB = VCB*;
 
-// One for root
-#define         UDF_RESIDUAL_REFERENCE              (2)
+// One for root - increased to allow volume locking during formatting
+#define         UDF_RESIDUAL_REFERENCE              (10)
 
 // input flush flags
 #define         UDF_FLUSH_FLAGS_BREAKABLE           (0x00000001)
