@@ -261,9 +261,8 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     }
     
     /* 2. Write Anchor Volume Descriptor Pointers at logical blocks 100 and 200 */
-    /* UDF uses 2048-byte logical blocks, so convert to 512-byte sectors */
+    /* UDF uses 2048-byte logical blocks */
     ULONG LogicalBlockSize = 2048;
-    ULONG BlocksPerSector = LogicalBlockSize / BytesPerSector;
     
     PUCHAR AvdpBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, LogicalBlockSize);
     if (!AvdpBuffer)
