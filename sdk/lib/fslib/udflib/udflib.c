@@ -220,7 +220,9 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
 
     UdfLibMessage(Callback, PROGRESS, 50, L"Writing UDF structures");
 
-    /* Write basic UDF 2.01 structures */
+    /* Write proper UDF 2.01 structures */
+    LARGE_INTEGER Offset;
+    ULONG BytesWritten;
     
     /* 1. Write Volume Recognition Sequence at sector 16 */
     PUCHAR VrsBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector * 3);
@@ -231,15 +233,25 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* NSR02 descriptor */
-    memcpy(VrsBuffer, "NSR02", 5);
+    /* BEA01 (Beginning Extended Area) */
+    memcpy(VrsBuffer, "BEA01", 5);
     VrsBuffer[5] = 1; // Structure version
+    for (ULONG i = 6; i < 2048; i++) VrsBuffer[i] = 0;
     
-    /* Write VRS to sector 16 */
-    LARGE_INTEGER Offset;
+    /* NSR02 descriptor (UDF 2.01) */
+    memcpy(VrsBuffer + BytesPerSector, "NSR02", 5);
+    VrsBuffer[BytesPerSector + 5] = 1; // Structure version
+    for (ULONG i = BytesPerSector + 6; i < BytesPerSector * 2; i++) VrsBuffer[i] = 0;
+    
+    /* TEA01 (Terminating Extended Area) */
+    memcpy(VrsBuffer + BytesPerSector * 2, "TEA01", 5);
+    VrsBuffer[BytesPerSector * 2 + 5] = 1; // Structure version
+    for (ULONG i = BytesPerSector * 2 + 6; i < BytesPerSector * 3; i++) VrsBuffer[i] = 0;
+    
+    /* Write VRS starting at sector 16 */
     Offset.QuadPart = 16 * BytesPerSector;
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
-                        VrsBuffer, BytesPerSector, &Offset, NULL);
+                        VrsBuffer, BytesPerSector * 3, &Offset, NULL);
     
     if (!NT_SUCCESS(Status))
     {
@@ -259,15 +271,32 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* AVDP tag */
+    /* AVDP tag (tag identifier 2, descriptor version 3, tag checksum, reserved, tag serial number, descriptor CRC, descriptor CRC length, tag location) */
     AvdpBuffer[0] = 2; // Tag identifier for AVDP
     AvdpBuffer[1] = 0;
-    AvdpBuffer[2] = 3; // Descriptor version
+    AvdpBuffer[2] = 3; // Descriptor version  
     AvdpBuffer[3] = 0;
+    AvdpBuffer[4] = 0; // Tag checksum (calculated)
+    AvdpBuffer[5] = 0; // Reserved
+    *(PUSHORT)(AvdpBuffer + 6) = 1; // Tag serial number
+    *(PUSHORT)(AvdpBuffer + 8) = 0; // Descriptor CRC (calculated)
+    *(PUSHORT)(AvdpBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
+    *(PULONG)(AvdpBuffer + 12) = 256; // Tag location
     
-    /* Main Volume Descriptor Sequence extent */
-    *(PULONG)(AvdpBuffer + 16) = 512 * BytesPerSector; // Length (512 sectors)
+    /* Main Volume Descriptor Sequence extent (length, location) */
+    *(PULONG)(AvdpBuffer + 16) = 32 * BytesPerSector; // Length (32 sectors)
     *(PULONG)(AvdpBuffer + 20) = 32; // Location (sector 32)
+    
+    /* Reserve Volume Descriptor Sequence extent (copy of main) */
+    *(PULONG)(AvdpBuffer + 24) = 32 * BytesPerSector; // Length
+    *(PULONG)(AvdpBuffer + 28) = 64; // Location (sector 64)
+    
+    /* Calculate and set tag checksum */
+    UCHAR checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += AvdpBuffer[i] + AvdpBuffer[i+1] + AvdpBuffer[i+2] + AvdpBuffer[i+3];
+    }
+    AvdpBuffer[4] = (UCHAR)(256 - checksum);
     
     /* Write AVDP to sector 256 */
     Offset.QuadPart = 256 * BytesPerSector;
@@ -294,14 +323,56 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* PVD tag */
+    /* PVD tag (tag identifier 1, descriptor version 3) */
     PvdBuffer[0] = 1; // Tag identifier for PVD
     PvdBuffer[1] = 0;
     PvdBuffer[2] = 3; // Descriptor version
     PvdBuffer[3] = 0;
+    PvdBuffer[4] = 0; // Tag checksum (calculated)
+    PvdBuffer[5] = 0; // Reserved
+    *(PUSHORT)(PvdBuffer + 6) = 1; // Tag serial number
+    *(PUSHORT)(PvdBuffer + 8) = 0; // Descriptor CRC (calculated)
+    *(PUSHORT)(PvdBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
+    *(PULONG)(PvdBuffer + 12) = 32; // Tag location
     
-    /* Volume identifier */
-    memcpy(PvdBuffer + 24, "ReactOS_UDF", 11);
+    /* Volume Descriptor Sequence Number */
+    *(PULONG)(PvdBuffer + 16) = 1;
+    
+    /* Primary Volume Descriptor Number */
+    *(PULONG)(PvdBuffer + 20) = 0;
+    
+    /* Volume identifier (32 characters, dstring) */
+    PvdBuffer[24] = 11; // Length of identifier
+    memcpy(PvdBuffer + 25, "ReactOS_UDF", 11);
+    
+    /* Volume sequence number */
+    *(PUSHORT)(PvdBuffer + 56) = 1;
+    
+    /* Maximum volume sequence number */
+    *(PUSHORT)(PvdBuffer + 58) = 1;
+    
+    /* Interchange level */
+    *(PUSHORT)(PvdBuffer + 60) = 3;
+    
+    /* Maximum interchange level */
+    *(PUSHORT)(PvdBuffer + 62) = 3;
+    
+    /* Character set list */
+    *(PULONG)(PvdBuffer + 64) = 1;
+    
+    /* Maximum character set list */
+    *(PULONG)(PvdBuffer + 68) = 1;
+    
+    /* Volume set identifier (128 characters) */
+    PvdBuffer[72] = 11;
+    memcpy(PvdBuffer + 73, "ReactOS_UDF", 11);
+    
+    /* Calculate and set tag checksum */
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += PvdBuffer[i] + PvdBuffer[i+1] + PvdBuffer[i+2] + PvdBuffer[i+3];
+    }
+    PvdBuffer[4] = (UCHAR)(256 - checksum);
     
     /* Write PVD to sector 32 */
     Offset.QuadPart = 32 * BytesPerSector;
@@ -318,26 +389,100 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         return FALSE;
     }
     
-    /* 4. Write Terminating Descriptor at sector 33 */
+    /* 4. Write Logical Volume Descriptor at sector 33 */
+    PUCHAR LvdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
+    if (!LvdBuffer)
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate LVD buffer");
+        return FALSE;
+    }
+    
+    /* LVD tag (tag identifier 6) */
+    LvdBuffer[0] = 6; // Tag identifier for LVD
+    LvdBuffer[1] = 0;
+    LvdBuffer[2] = 3; // Descriptor version
+    LvdBuffer[3] = 0;
+    LvdBuffer[4] = 0; // Tag checksum (calculated)
+    LvdBuffer[5] = 0; // Reserved
+    *(PUSHORT)(LvdBuffer + 6) = 1; // Tag serial number
+    *(PUSHORT)(LvdBuffer + 8) = 0; // Descriptor CRC (calculated)
+    *(PUSHORT)(LvdBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
+    *(PULONG)(LvdBuffer + 12) = 33; // Tag location
+    
+    /* Volume Descriptor Sequence Number */
+    *(PULONG)(LvdBuffer + 16) = 2;
+    
+    /* Logical volume identifier */
+    LvdBuffer[84] = 11; // Length
+    memcpy(LvdBuffer + 85, "ReactOS_UDF", 11);
+    
+    /* Logical block size */
+    *(PULONG)(LvdBuffer + 212) = BytesPerSector;
+    
+    /* Calculate and set tag checksum */
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += LvdBuffer[i] + LvdBuffer[i+1] + LvdBuffer[i+2] + LvdBuffer[i+3];
+    }
+    LvdBuffer[4] = (UCHAR)(256 - checksum);
+    
+    /* Write LVD to sector 33 */
+    Offset.QuadPart = 33 * BytesPerSector;
+    Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
+                        LvdBuffer, BytesPerSector, &Offset, NULL);
+    
+    if (!NT_SUCCESS(Status))
+    {
+        RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, LvdBuffer);
+        NtClose(DeviceHandle);
+        UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write LVD");
+        return FALSE;
+    }
+    
+    /* 5. Write Terminating Descriptor at sector 34 */
     PUCHAR TdBuffer = RtlAllocateHeap(RtlGetProcessHeap(), HEAP_ZERO_MEMORY, BytesPerSector);
     if (!TdBuffer)
     {
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, LvdBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to allocate TD buffer");
         return FALSE;
     }
     
-    /* TD tag */
+    /* TD tag (tag identifier 8) */
     TdBuffer[0] = 8; // Tag identifier for Terminating Descriptor
     TdBuffer[1] = 0;
     TdBuffer[2] = 3; // Descriptor version
     TdBuffer[3] = 0;
+    TdBuffer[4] = 0; // Tag checksum (calculated)
+    TdBuffer[5] = 0; // Reserved
+    *(PUSHORT)(TdBuffer + 6) = 1; // Tag serial number
+    *(PUSHORT)(TdBuffer + 8) = 0; // Descriptor CRC (calculated)
+    *(PUSHORT)(TdBuffer + 10) = BytesPerSector - 16; // Descriptor CRC length
+    *(PULONG)(TdBuffer + 12) = 34; // Tag location
     
-    /* Write TD to sector 33 */
-    Offset.QuadPart = 33 * BytesPerSector;
+    /* Volume Descriptor Sequence Number */
+    *(PULONG)(TdBuffer + 16) = 3;
+    
+    /* Calculate and set tag checksum */
+    checksum = 0;
+    for (ULONG i = 0; i < 16; i += 4) {
+        if (i != 4) checksum += TdBuffer[i] + TdBuffer[i+1] + TdBuffer[i+2] + TdBuffer[i+3];
+    }
+    TdBuffer[4] = (UCHAR)(256 - checksum);
+    
+    /* Write TD to sector 34 */
+    Offset.QuadPart = 34 * BytesPerSector;
     Status = NtWriteFile(DeviceHandle, NULL, NULL, NULL, &IoStatusBlock,
                         TdBuffer, BytesPerSector, &Offset, NULL);
     
@@ -346,6 +491,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
         RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+        RtlFreeHeap(RtlGetProcessHeap(), 0, LvdBuffer);
         RtlFreeHeap(RtlGetProcessHeap(), 0, TdBuffer);
         NtClose(DeviceHandle);
         UdfLibMessage(Callback, DONEWITHSTRUCTURE, 0, L"Failed to write TD");
@@ -356,6 +502,7 @@ UdfFormat(IN PUNICODE_STRING DriveRoot,
     RtlFreeHeap(RtlGetProcessHeap(), 0, VrsBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, AvdpBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, PvdBuffer);
+    RtlFreeHeap(RtlGetProcessHeap(), 0, LvdBuffer);
     RtlFreeHeap(RtlGetProcessHeap(), 0, TdBuffer);
 
     UdfLibMessage(Callback, PROGRESS, 90, L"Preparing boot area");

@@ -153,7 +153,8 @@ const DEVVTBL* UdfMount(ULONG DeviceId)
     if (ArcRead(DeviceId, Buffer, sizeof(Buffer), &Count) != ESUCCESS)
         return NULL;
 
-    /* Check for UDF Volume Recognition Sequence at sector 16 */
+    /* Check for UDF Volume Recognition Sequence starting at sector 16 */
+    /* BEA01 should be at sector 16, NSR02/NSR03 at sector 17 */
     Position.QuadPart = 16 * UDF_SECTOR_SIZE;
     if (ArcSeek(DeviceId, &Position, SeekAbsolute) != ESUCCESS)
         return NULL;
@@ -161,14 +162,32 @@ const DEVVTBL* UdfMount(ULONG DeviceId)
     if (ArcRead(DeviceId, Buffer, sizeof(Buffer), &Count) != ESUCCESS)
         return NULL;
 
-    /* Check for NSR02 or NSR03 identifier */
-    if (Count >= 5 && (memcmp(Buffer, "NSR02", 5) == 0 || memcmp(Buffer, "NSR03", 5) == 0))
+    /* Check for BEA01 identifier at sector 16 */
+    if (Count >= 5 && memcmp(Buffer, "BEA01", 5) == 0)
     {
-        TRACE("UdfMount: Found UDF Volume Recognition Sequence\n");
+        TRACE("UdfMount: Found BEA01 at sector 16\n");
+        
+        /* Now check for NSR02/NSR03 at sector 17 */
+        Position.QuadPart = 17 * UDF_SECTOR_SIZE;
+        if (ArcSeek(DeviceId, &Position, SeekAbsolute) != ESUCCESS)
+            return NULL;
+
+        if (ArcRead(DeviceId, Buffer, sizeof(Buffer), &Count) != ESUCCESS)
+            return NULL;
+
+        if (Count >= 5 && (memcmp(Buffer, "NSR02", 5) == 0 || memcmp(Buffer, "NSR03", 5) == 0))
+        {
+            TRACE("UdfMount: Found UDF Volume Recognition Sequence (NSR02/NSR03)\n");
+        }
+        else
+        {
+            TRACE("UdfMount: No NSR02/NSR03 found at sector 17\n");
+            return NULL;
+        }
     }
     else
     {
-        TRACE("UdfMount: No UDF Volume Recognition Sequence found\n");
+        TRACE("UdfMount: No BEA01 found at sector 16\n");
         return NULL;
     }
 
