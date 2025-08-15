@@ -195,6 +195,34 @@ UDFCommonClose(
 
         ASSERT_CCB(Ccb);
 
+        //  Handle UserVolumeOpen separately (like FastFAT)
+        if (TypeOfOpen == UserVolumeOpen) {
+            
+            AdPrint(("UDF: Closing volume\n"));
+            
+            // Get VCB from FileObject (since Fcb is NULL for volume opens)
+            PVCB Vcb = UDFGetVcbFromFileObject(FileObject);
+            ASSERT(Vcb != NULL);
+            
+            // Decrement volume reference counts (like FastFAT)
+            UDFAcquireResourceShared(&(Vcb->VcbResource), TRUE);
+            
+            // Decrement VCB reference count
+            UDFInterlockedDecrement((PLONG)&(Vcb->VcbReference));
+            
+            // Handle read-only count if applicable
+            // (Note: UDF doesn't currently track ReadOnlyCount like FastFAT)
+            
+            // Delete the CCB
+            UDFDeleteCcb(Ccb);
+            FileObject->FsContext2 = NULL;
+            
+            UDFReleaseResource(&(Vcb->VcbResource));
+            
+            UDFCompleteRequest(IrpContext, Irp, STATUS_SUCCESS);
+            return STATUS_SUCCESS;
+        }
+
     } else {
 
         // If this is a queued call (for our dispatch)
@@ -268,54 +296,9 @@ UDFCommonClose(
 
         UDFInterlockedDecrement((PLONG)&(Vcb->VcbReference));
 
-        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
-
-            AdPrint(("UDF: Closing volume\n"));
-            AdPrint(("UDF: ReferenceCount:  %x\n",Fcb->FcbReference));
-
-            if (Vcb->VcbReference > UDF_RESIDUAL_REFERENCE) {
-                ASSERT(Fcb == Fcb->Vcb->VolumeDasdFcb);
-                UDFInterlockedDecrement((PLONG)&Fcb->FcbReference);
-                ASSERT(Fcb);
-
-                try_return(RC = STATUS_SUCCESS);
-            }
-
-            UDFInterlockedIncrement((PLONG)&Vcb->VcbReference);
-
-            if (AcquiredVcb) {
-                UDFReleaseResource(&(Vcb->VcbResource));
-                AcquiredVcb = FALSE;
-            } else {
-                BrutePoint();
-            }
-            // Acquire GlobalDataResource
-            UDFAcquireResourceExclusive(&UdfData.GlobalDataResource, TRUE);
-            AcquiredGD = TRUE;
-//            // Acquire Vcb
-            UDFAcquireResourceExclusive(&Vcb->VcbResource, TRUE);
-            AcquiredVcb = TRUE;
-
-            UDFInterlockedDecrement((PLONG)&Vcb->VcbReference);
-
-
-            ASSERT(Fcb == Fcb->Vcb->VolumeDasdFcb);
-            UDFInterlockedDecrement((PLONG)&Fcb->FcbReference);
-            ASSERT(Fcb);
-
-            //AdPrint(("UDF: Closing volume, reset driver (e.g. stop BGF)\n"));
-            //UDFResetDeviceDriver(Vcb, Vcb->TargetDeviceObject, FALSE);
-
-            if (Vcb->VcbCondition == VcbDismountInProgress ||
-               Vcb->VcbCondition == VcbInvalid ||
-             ((Vcb->VcbCondition == VcbNotMounted) && (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE))) {
-                // Try to KILL dismounted volume....
-                // w2k requires this, NT4 - recomends
-                AcquiredVcb = UDFCheckForDismount(IrpContext, Vcb, TRUE);
-            }
-
-            try_return(RC = STATUS_SUCCESS);
-        }
+        // Old volume detection logic removed - UserVolumeOpen is now handled 
+        // separately at the beginning of this function using TypeOfOpen 
+        // (following FastFAT approach)
 
         fi = Fcb->FileInfo;
 #ifdef UDF_DBG

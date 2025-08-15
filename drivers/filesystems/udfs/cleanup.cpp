@@ -185,9 +185,11 @@ UDFCommonCleanup(
         // and other similar stuff.
         //  BrutePoint();
 
-        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
+        if (TypeOfOpen == UserVolumeOpen) {
             AdPrint(("Cleaning up Volume\n"));
-            AdPrint(("UDF: FcbCleanup: %x\n", Fcb->FcbCleanup));
+            
+            // Get VCB from FileObject (since Fcb is NULL for volume opens)
+            PVCB Vcb = UDFGetVcbFromFileObject(FileObject);
 
             // For a force dismount, physically disconnect this Vcb from the device so 
             // a new mount can occur.  Vcb deletion cannot happen at this time since 
@@ -223,22 +225,9 @@ UDFCommonCleanup(
                 SendUnlockNotification = TRUE;
             }
 
-            UDFInterlockedDecrement((PLONG)&(Fcb->FcbCleanup));
+            // For volume opens, we don't have FCB-level state to clean up
+            // (following FastFAT approach where UserVolumeOpen has no FCB)
             UDFInterlockedDecrement((PLONG)&(Vcb->VcbCleanup));
-            if (FileObject->Flags & FO_CACHE_SUPPORTED) {
-                // we've cached close
-                UDFInterlockedDecrement((PLONG)&(Fcb->CachedOpenHandleCount));
-            }
-            ASSERT(Fcb->FcbCleanup <= (Fcb->FcbReference-1));
-
-
-            MmPrint(("    CcUninitializeCacheMap()\n"));
-            CcUninitializeCacheMap(FileObject, NULL, NULL);
-
-            //  We must clean up the share access at this time, since we may not
-            //  get a Close call for awhile if the file was mapped through this
-            //  File Object.
-            IoRemoveShareAccess( FileObject, &Fcb->ShareAccess);
 
             try_return(RC = STATUS_SUCCESS);
         }
