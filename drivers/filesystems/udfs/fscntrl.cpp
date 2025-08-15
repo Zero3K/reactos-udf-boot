@@ -714,7 +714,7 @@ UDFCloseResidual(
         UDFCloseFile__(IrpContext, Vcb, Vcb->RootIndexFcb->FileInfo);
         if (Vcb->RootIndexFcb->FcbCleanup)
             Vcb->RootIndexFcb->FcbCleanup--;
-        UDFTeardownStructures(IrpContext, Vcb->RootIndexFcb, 1, NULL);
+        UDFTeardownStructures(IrpContext, Vcb->RootIndexFcb, NULL);
         // Remove root FCB reference in vcb
         if (Vcb->VcbReference)
             UDFInterlockedDecrement((PLONG)&(Vcb->VcbReference));

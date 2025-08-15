@@ -241,7 +241,6 @@ UDFCommonCreate(
     PUDF_FILE_INFO              NewFileInfo = NULL;
     PUDF_FILE_INFO              LastGoodFileInfo = NULL;
     PWCHAR                      TmpBuffer;
-    ULONG                       TreeLength = 0;
 //    ULONG                       i = 0;
 
     BOOLEAN                     StreamOpen = FALSE;
@@ -920,7 +919,6 @@ op_vol_accs_dnd:
 //            DbgPrint("UDF: Open/Create RootDir : ReferenceCount %x\n",PtrNewFcb->ReferenceCount);
             UDFReferenceFile__(PtrNewFcb->FileInfo);
             PtrNewCcb = UDFDecodeFileObjectCcb(FileObject);
-            TreeLength = 1;
 
             RC = UDFCheckAccessRights(FileObject, AccessState, PtrNewFcb, PtrNewCcb, DesiredAccess, ShareAccess);
             if (!NT_SUCCESS(RC)) {
@@ -967,7 +965,6 @@ op_vol_accs_dnd:
             NextFcb = NextFcb->ParentFcb;
             // prevent releasing parent structures
             UDFAcquireParent(RelatedFileInfo, &Res1, &Res2);
-            TreeLength++;
 
             if (Res1) UDFReleaseResource(Res1);
             if (Res2) UDFReleaseResource(Res2);
@@ -979,7 +976,6 @@ op_vol_accs_dnd:
             UDF_CHECK_PAGING_IO_RESOURCE(PtrNewFcb);
             UDFAcquireResourceExclusive(Res1 = &PtrNewFcb->FcbNonpaged->FcbResource, TRUE);
             UDFReferenceFile__(NewFileInfo);
-            TreeLength++;
 
             goto AlreadyOpened;
         }
@@ -1045,7 +1041,6 @@ op_vol_accs_dnd:
         LastGoodFileInfo = RelatedFileInfo;
         // reference RelatedObject to prevent releasing parent structures
         UDFAcquireParent(RelatedFileInfo, &Res1, &Res2);
-        TreeLength++;
 
         // go into a loop parsing the supplied name
 
@@ -1105,7 +1100,7 @@ op_vol_accs_dnd:
 
                 ASSERT(RelatedFileInfo->Fcb->FcbReference >= RelatedFileInfo->RefCount);
 
-                if (RelatedFileInfo && (TreeLength>1)) {
+                if (RelatedFileInfo) {
                     // it was an internal Open operation. Thus, assume
                     // RelatedFileInfo's Fcb to be valid
                     RelatedFileInfo->Fcb->NtReqFCBFlags |= UDF_NTREQ_FCB_VALID;
@@ -1244,7 +1239,6 @@ Skip_open_attempt:
                     // update unwind information
                     LastGoodFileInfo = NewFileInfo;
                     LastGoodName = CurName;
-                    TreeLength++;
                     // update current path
                     if (!StreamOpen ||
                          ((CurName.Buffer[0] != L':') &&
@@ -1591,7 +1585,6 @@ Undo_Create_1:
                 }
 
                 // Update unwind information
-                TreeLength++;
                 LastGoodFileInfo = NewFileInfo;
                 // update FCB tree
                 RC = MyAppendUnicodeToString(&LocalPath, L"\\");
@@ -1643,7 +1636,6 @@ Undo_Create_1:
                 }
 
                 // Update unwind information
-                TreeLength++;
                 LastGoodFileInfo = NewFileInfo;
                 // update FCB tree
                 RC = MyAppendUnicodeStringToStringTag(&LocalPath, &(UdfData.UnicodeStrSDir), MEM_USLOC_TAG);
@@ -1717,7 +1709,6 @@ Undo_Create_1:
             }
 
             // Update unwind information
-            TreeLength++;
             LastGoodFileInfo = NewFileInfo;
 
             // Set the Share Access for the file stream.
@@ -2091,7 +2082,6 @@ try_exit:   NOTHING;
                     UDFInterlockedIncrement((PLONG)&(PtrNewFcb->CachedOpenHandleCount));
                 // Store some flags in CCB
                 if (PtrNewCcb) {
-                    PtrNewCcb->TreeLength = TreeLength;
                     // delete on close
 
                     if (DeleteOnClose) {
@@ -2152,11 +2142,11 @@ try_exit:   NOTHING;
                 UDFReleaseResFromCreate(&PagingIoRes, &Res1, &Res2);
                 ASSERT(AcquiredVcb);
                 // close the chain
-                UDFCloseFileInfoChain(IrpContext, Vcb, LastGoodFileInfo, TreeLength, TRUE);
+                UDFCloseFileInfoChain(IrpContext, Vcb, LastGoodFileInfo, TRUE);
                 // cleanup FCBs (if any)
                 if (  Vcb && (PtrNewFcb != Vcb->RootIndexFcb) &&
                      LastGoodFileInfo ) {
-                    UDFTeardownStructures(IrpContext, LastGoodFileInfo->Fcb, TreeLength, NULL);
+                    UDFTeardownStructures(IrpContext, LastGoodFileInfo->Fcb, NULL);
                 } else {
                     ASSERT(!LastGoodFileInfo);
                 }
@@ -2453,12 +2443,8 @@ UDFOpenFile(
         Fcb->FcbState &= ~UDF_FCB_DELAY_CLOSE;
 #endif //UDF_DELAYED_CLOSE
 
-        UDFAcquireResourceExclusive(&Fcb->CcbListResource, TRUE);
-        // insert CCB into linked list of open file object to Fcb or
-        // to Vcb and do other intialization
-        InsertTailList(&Fcb->NextCCB, &Ccb->NextCCB);
+        // Increment reference count for the FCB
         UDFInterlockedIncrement((PLONG)&Fcb->FcbReference);
-        UDFReleaseResource(&Fcb->CcbListResource);
 
 try_exit:   NOTHING;
     } _SEH2_FINALLY {

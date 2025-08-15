@@ -615,36 +615,13 @@ UDFInitializeFCB(
     FsRtlSetupAdvancedHeader(&Fcb->Header, &Fcb->FcbNonpaged->AdvancedFcbHeaderMutex);
     Fcb->FileLock = NULL;
 
-    if (!NT_SUCCESS(status = UDFInitializeResourceLite(&Fcb->CcbListResource))) {
-
-        AdPrint(("    Can't init resource (3)\n"));
-        BrutePoint();
-
-        UDFDeleteResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
-        UDFDeleteResource(&Fcb->FcbNonpaged->FcbResource);
-        Fcb->Header.Resource = NULL;
-        Fcb->Header.PagingIoResource = NULL;
-
-        if (Fcb->FileLock != NULL) {
-
-            FsRtlFreeFileLock(Fcb->FileLock);
-        }
-
-        return status;
-    }
-
     Fcb->FcbState = Flags;
 
     UDFInsertFcbTable(IrpContext, Fcb);
     SetFlag(Fcb->FcbState, FCB_STATE_IN_FCB_TABLE);
 
-    // initialize the various list heads
-    InitializeListHead(&Fcb->NextCCB);
-
     Fcb->FcbReference = 0;
     Fcb->FcbCleanup = 0;
-
-    SetFlag(Fcb->FcbState, UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE);
 
     Fcb->FCBName = PtrObjectName;
 
@@ -1045,9 +1022,6 @@ UDFCleanUpFCB(
 
         // } end transaction
 
-        if (Fcb->FcbState & UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE)
-            UDFDeleteResource(&(Fcb->CcbListResource));
-
         // Free memory
         UDFDeleteFcb(0, Fcb);
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
@@ -1319,8 +1293,6 @@ UDFCompleteMount(
         UnlockVcb = TRUE;
 
         Vcb->VolumeDasdFcb = UDFCreateFcb(IrpContext, FileId, UDF_NODE_TYPE_DATA, NULL);
-
-        InitializeListHead(&Vcb->VolumeDasdFcb->NextCCB);
 
         UDFIncrementReferenceCounts(IrpContext, Vcb->VolumeDasdFcb, 1, 1);
         UDFUnlockVcb(IrpContext, Vcb);

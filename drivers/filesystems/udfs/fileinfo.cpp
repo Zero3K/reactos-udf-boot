@@ -2166,15 +2166,10 @@ UDFSetRenameInfo(
     PUDF_FILE_INFO FileInfo;
     PUDF_FILE_INFO DirInfo;
     PUDF_FILE_INFO TargetDirInfo;
-    PUDF_FILE_INFO NextFileInfo, fi;
+    PUDF_FILE_INFO fi;
 
     UNICODE_STRING NewName;
     UNICODE_STRING LocalPath;
-    PCCB CurCcb = NULL;
-    PLIST_ENTRY Link;
-    ULONG i;
-    ULONG DirRefCount;
-    ULONG FileInfoRefCount;
     ULONG Attr;
     PDIR_INDEX_ITEM DirNdx;
 
@@ -2392,61 +2387,13 @@ post_rename:
         UDFInterlockedIncrement((PLONG)&DirInfo->Fcb->FcbReference);
         ASSERT(DirInfo->Fcb->FcbReference >= DirInfo->RefCount);
 
-        // Look through Ccb list & decrement OpenHandleCounter(s)
-        // acquire CcbList
+        // Update parent FCB pointer for rename (simplified approach like FastFAT)
         if (!SingleDir) {
-            UDFAcquireResourceExclusive(&Fcb->CcbListResource, TRUE);
-            Link = Fcb->NextCCB.Flink;
-            DirRefCount = 0;
-            FileInfoRefCount = 0;
-            ASSERT(Link != &Fcb->NextCCB);
-            while (Link != &Fcb->NextCCB) {
-                NextFileInfo = DirInfo;
-                CurCcb = CONTAINING_RECORD(Link, CCB, NextCCB);
-                ASSERT(CurCcb->TreeLength);
-                i = (CurCcb->TreeLength) ? (CurCcb->TreeLength - 1) : 0;
-                Link = Link->Flink;
-                UseClose = (CurCcb->Flags & UDF_CCB_CLEANED) ? FALSE : TRUE;
-
-                AdPrint(("  Ccb:%x:%s:i:%x\n", CurCcb, UseClose ? "Close" : "",i));
-                // cleanup old parent chain
-                for(; i && NextFileInfo; i--) {
-                    // remember parent file now
-                    // it will prevent us from data losses
-                    // due to eventual structure release
-                    fi = NextFileInfo->ParentFile;
-                    if (UseClose) {
-                        ASSERT(NextFileInfo->Fcb->FcbReference >= NextFileInfo->RefCount);
-                        UDFCloseFile__(IrpContext, Vcb, NextFileInfo);
-                    }
-                    ASSERT(NextFileInfo->Fcb->FcbReference > NextFileInfo->RefCount);
-                    ASSERT(NextFileInfo->Fcb->FcbReference);
-                    UDFInterlockedDecrement((PLONG)&NextFileInfo->Fcb->FcbReference);
-                    ASSERT(NextFileInfo->Fcb->FcbReference >= NextFileInfo->RefCount);
-                    NextFileInfo = fi;
-                }
-
-                if (CurCcb->TreeLength > 1) {
-                    DirRefCount++;
-                    if (UseClose)
-                        FileInfoRefCount++;
-                    CurCcb->TreeLength = 2;
-#ifdef UDF_DBG
-                } else {
-                    BrutePoint();
-#endif // UDF_DBG
-                }
-            }
-            UDFReleaseResource(&Fcb->CcbListResource);
-
-            ASSERT(DirRefCount >= FileInfoRefCount);
-            // update counters & pointers
+            // Update the parent FCB pointer
             Fcb->ParentFcb = TargetDirInfo->Fcb;
-            // move references to TargetDir
-            UDFInterlockedExchangeAdd((PLONG)&TargetDirInfo->Fcb->FcbReference, DirRefCount);
-            ASSERT(TargetDirInfo->Fcb->FcbReference > TargetDirInfo->RefCount);
-            UDFReferenceFileEx__(TargetDirInfo,FileInfoRefCount);
-            ASSERT(TargetDirInfo->Fcb->FcbReference >= TargetDirInfo->RefCount);
+            // Add reference to target directory
+            UDFInterlockedIncrement((PLONG)&TargetDirInfo->Fcb->FcbReference);
+            UDFReferenceFile__(TargetDirInfo);
         }
         ASSERT(TargetDirInfo->Fcb->FcbReference >= TargetDirInfo->RefCount);
         ASSERT(TargetDirInfo->RefCount);
@@ -2474,7 +2421,7 @@ insuf_res:
                 UDFReleaseResource(&DirInfo->Fcb->FcbNonpaged->FcbResource);
                 AcquiredDir1 = FALSE;
             }
-            UDFTeardownStructures(IrpContext, DirInfo->Fcb, 1, NULL);
+            UDFTeardownStructures(IrpContext, DirInfo->Fcb, NULL);
             try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
         }
 
@@ -2517,7 +2464,7 @@ try_exit:    NOTHING;
         if (NT_SUCCESS(RC) &&
            (RC != STATUS_PENDING)) {
             ASSERT(AcquiredVcb);
-            UDFTeardownStructures(IrpContext, DirInfo->Fcb, 1, NULL);
+            UDFTeardownStructures(IrpContext, DirInfo->Fcb, NULL);
             ASSERT(Fcb->FcbReference >= FileInfo->RefCount);
             ASSERT(TargetDirInfo->Fcb->FcbReference >= TargetDirInfo->RefCount);
         }

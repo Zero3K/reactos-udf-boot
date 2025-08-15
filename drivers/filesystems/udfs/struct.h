@@ -82,8 +82,6 @@ struct CCB {
     UDFIdentifier                       NodeIdentifier;
     // ptr to the associated FCB
     FCB*                                Fcb;
-    // all CCB structures for a FCB are linked together
-    LIST_ENTRY                          NextCCB;
     // each CCB is associated with a file object
     PFILE_OBJECT                        FileObject;
     // flags (see below) associated with this CCB
@@ -94,7 +92,6 @@ struct CCB {
     //  need to maintain a search pattern
     PUNICODE_STRING                     DirectorySearchPattern;
     HASH_ENTRY                          hashes;
-    ULONG                               TreeLength;
     // Acces rights previously granted to caller's thread
     ACCESS_MASK                         PreviouslyGrantedAccess;
 };
@@ -270,7 +267,6 @@ struct FCB {
     // for the UDF fsd, there exists a 1-1 correspondence between a
     //  full object pathname and a FCB
     PtrUDFObjectName                    FCBName;
-    ERESOURCE                           CcbListResource;
 
     // Pointer to the Fcb non-paged structures.
 
@@ -806,7 +802,6 @@ struct IRP_CONTEXT {
     NTSTATUS                        ExceptionStatus;
     // For queued close operation we save Fcb
     FCB*                            Fcb;
-    ULONG                           TreeLength;
 
     // Io context for a read request.
     // Address of Fcb for teardown oplock in create case.
@@ -890,7 +885,6 @@ struct IRP_CONTEXT_LITE {
     ULONG                           UserReference;
     //  Real device object.  This represents the physical device closest to the media.
     PDEVICE_OBJECT                  RealDevice;
-    ULONG                           TreeLength;
 };
 using PIRP_CONTEXT_LITE = IRP_CONTEXT_LITE*;
 

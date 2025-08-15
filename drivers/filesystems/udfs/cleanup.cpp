@@ -633,7 +633,7 @@ DiscardDelete:
         AcquiredParentFCB = FALSE;
         // close the chain
         ASSERT(AcquiredVcb);
-        RC2 = UDFCloseFileInfoChain(IrpContext, Vcb, NextFileInfo, Ccb->TreeLength, TRUE);
+        RC2 = UDFCloseFileInfoChain(IrpContext, Vcb, NextFileInfo, TRUE);
         if (NT_SUCCESS(RC))
             RC = RC2;
 
@@ -695,7 +695,6 @@ UDFCloseFileInfoChain(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
     IN PUDF_FILE_INFO fi,
-    IN ULONG TreeLength,
     IN BOOLEAN VcbAcquired
     )
 {
@@ -710,7 +709,7 @@ UDFCloseFileInfoChain(
         UDFAcquireResourceShared(&(Vcb->VcbResource),TRUE);
 
     AdPrint(("UDFCloseFileInfoChain\n"));
-    for(; TreeLength && fi; TreeLength--) {
+    for(; fi; ) {
 
         // close parent chain (if any)
         // if we started path parsing not from RootDir on Create,

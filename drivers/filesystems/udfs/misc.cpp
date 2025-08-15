@@ -707,10 +707,7 @@ UDFDeleteCcb(
 
     _SEH2_TRY {
         if (Ccb->Fcb) {
-            UDFTouch(&(Ccb->Fcb->CcbListResource));
-            UDFAcquireResourceExclusive(&(Ccb->Fcb->CcbListResource),TRUE);
-            RemoveEntryList(&(Ccb->NextCCB));
-            UDFReleaseResource(&(Ccb->Fcb->CcbListResource));
+            // No longer need to maintain CCB list - FCB reference counting is sufficient
         } else {
             BrutePoint();
         }
@@ -1832,7 +1829,6 @@ UDFInitializeStackIrpContextFromLite(
     IrpContext->MajorFunction = IRP_MJ_CLOSE;
     IrpContext->Vcb = IrpContextLite->Fcb->Vcb;
     IrpContext->Fcb = IrpContextLite->Fcb;
-    IrpContext->TreeLength = IrpContextLite->TreeLength;
     IrpContext->RealDevice = IrpContextLite->RealDevice;
 
     // Note that this is from the stack.
@@ -1877,7 +1873,6 @@ UDFInitializeIrpContextLite(
     LocalIrpContextLite->NodeIdentifier.NodeByteSize = sizeof(IRP_CONTEXT_LITE);
 
     LocalIrpContextLite->Fcb = Fcb;
-    LocalIrpContextLite->TreeLength = IrpContext->TreeLength;
     //  Copy RealDevice for workque algorithms.
     LocalIrpContextLite->RealDevice = IrpContext->RealDevice;
     *IrpContextLite = LocalIrpContextLite;

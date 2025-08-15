@@ -124,7 +124,6 @@ UDFCloseFileInfoChain(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
     IN PUDF_FILE_INFO fi,
-    IN ULONG TreeLength,
     IN BOOLEAN VcbAcquired
     );
 
@@ -147,7 +146,6 @@ VOID
 UDFTeardownStructures(
     _In_ PIRP_CONTEXT IrpContext,
     _Inout_ PFCB StartingFcb,
-    _In_ ULONG TreeLength,
     _Out_ PBOOLEAN RemovedStartingFcb
     );
 
