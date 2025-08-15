@@ -759,7 +759,6 @@ Return Value:
 
     // Copy RealDevice for workque algorithms.
 
-    IrpContext->TreeLength = IrpContextLite->TreeLength;
     IrpContext->RealDevice = IrpContextLite->RealDevice;
 
     // The Vcb is found in the Fcb.
