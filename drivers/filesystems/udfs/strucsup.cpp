@@ -605,7 +605,6 @@ UDFInitializeFCB(
     ASSERT_LOCKED_VCB(Vcb);
 
     AdPrint(("UDFInitializeFCB\n"));
-    NTSTATUS status;
 
     // Fill NT required Fcb part
 
