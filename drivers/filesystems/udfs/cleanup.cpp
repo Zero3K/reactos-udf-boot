@@ -159,10 +159,12 @@ UDFCommonCleanup(
     }
 
     //  Keep a local pointer to the Vcb.
-    Vcb = Fcb->Vcb;
+    Vcb = UDFGetVcbFromFileObject(FileObject);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
     ASSERT_VCB(Vcb);
 
     _SEH2_TRY {
@@ -188,8 +190,7 @@ UDFCommonCleanup(
         if (TypeOfOpen == UserVolumeOpen) {
             AdPrint(("Cleaning up Volume\n"));
             
-            // Get VCB from FileObject (since Fcb is NULL for volume opens)
-            PVCB Vcb = UDFGetVcbFromFileObject(FileObject);
+            // VCB already obtained from UDFGetVcbFromFileObject above
 
             // For a force dismount, physically disconnect this Vcb from the device so 
             // a new mount can occur.  Vcb deletion cannot happen at this time since 
