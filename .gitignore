@@ -14,3 +14,4 @@ modules/[Aa][Hh][Kk]_[Tt]ests
 .vscode
 sdk/tools/winesync/winesync.cfg
 *.gch
+build/

@@ -330,7 +330,6 @@ using PFCB = FCB*;
 #define     UDF_FCB_DELAY_CLOSE                         (0x00002000)
 #define     UDF_FCB_DELETED                             (0x00004000)
 
-#define     UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE       (0x00008000)
 #define     UDF_FCB_POSTED_RENAME                       (0x00010000)
 
 #define     FCB_STATE_INITIALIZED                       (0x00020000)
