@@ -967,10 +967,14 @@ UDFLockVolume(
     // Decode the file object, the only type of opens we accept are
     // user volume opens.
 
-    UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
+    TYPE_OF_OPEN TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
     if (!Ccb) {
 
@@ -980,11 +984,16 @@ UDFLockVolume(
         return STATUS_INVALID_PARAMETER;
     }
 
-    Vcb = Fcb->Vcb;
+    // For UserVolumeOpen, get VCB from FileObject; for others, get from FCB
+    if (TypeOfOpen == UserVolumeOpen) {
+        Vcb = UDFGetVcbFromFileObject(IrpSp->FileObject);
+    } else {
+        Vcb = Fcb->Vcb;
+    }
     ASSERT_VCB(Vcb);
 
-    // Check for volume open
-    if (Fcb != Fcb->Vcb->VolumeDasdFcb || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
+    // Check for volume open (should be UserVolumeOpen with volume flags)
+    if (TypeOfOpen != UserVolumeOpen || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
 
         UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
         return STATUS_INVALID_PARAMETER;
@@ -1217,10 +1226,14 @@ UDFUnlockVolume(
     // Decode the file object, the only type of opens we accept are
     // user volume opens.
 
-    UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
+    TYPE_OF_OPEN TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
     if (!Ccb) {
         UDFPrintErr(("  !Ccb\n"));
@@ -1229,11 +1242,16 @@ UDFUnlockVolume(
         return STATUS_INVALID_PARAMETER;
     }
 
-    Vcb = Fcb->Vcb;
+    // For UserVolumeOpen, get VCB from FileObject; for others, get from FCB
+    if (TypeOfOpen == UserVolumeOpen) {
+        Vcb = UDFGetVcbFromFileObject(IrpSp->FileObject);
+    } else {
+        Vcb = Fcb->Vcb;
+    }
     ASSERT_VCB(Vcb);
 
     // Check for volume open
-    if (Fcb != Fcb->Vcb->VolumeDasdFcb || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
+    if (TypeOfOpen != UserVolumeOpen || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
 
         UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
         return STATUS_INVALID_PARAMETER;
@@ -1294,10 +1312,14 @@ UDFDismountVolume(
     // Decode the file object, the only type of opens we accept are
     // user volume opens.
 
-    UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
+    TYPE_OF_OPEN TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
     if (!Ccb) {
 
@@ -1308,11 +1330,16 @@ UDFDismountVolume(
         return STATUS_INVALID_PARAMETER;
     }
 
-    Vcb = Fcb->Vcb;
+    // For UserVolumeOpen, get VCB from FileObject; for others, get from FCB
+    if (TypeOfOpen == UserVolumeOpen) {
+        Vcb = UDFGetVcbFromFileObject(IrpSp->FileObject);
+    } else {
+        Vcb = Fcb->Vcb;
+    }
     ASSERT_VCB(Vcb);
 
     // Check for volume open
-    if (Fcb != Fcb->Vcb->VolumeDasdFcb || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
+    if (TypeOfOpen != UserVolumeOpen || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
 
         Irp->IoStatus.Information = 0;
         UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
@@ -1772,12 +1799,21 @@ UDFIsVolumeDirty(
 
     (*VolumeState) = 0;
 
-    UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
+    TYPE_OF_OPEN TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
-    Vcb = Fcb->Vcb;
+    // For UserVolumeOpen, get VCB from FileObject; for others, get from FCB
+    if (TypeOfOpen == UserVolumeOpen) {
+        Vcb = UDFGetVcbFromFileObject(IrpSp->FileObject);
+    } else {
+        Vcb = Fcb->Vcb;
+    }
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
     ASSERT_VCB(Vcb);
 
     if (!Ccb) {
@@ -1786,7 +1822,7 @@ UDFIsVolumeDirty(
         return STATUS_INVALID_PARAMETER;
     }
 
-    if (Fcb != Fcb->Vcb->VolumeDasdFcb || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
+    if (TypeOfOpen != UserVolumeOpen || !(Ccb->Flags & UDF_CCB_VOLUME_OPEN)) {
 
         UDFPrintErr(("  !Volume\n"));
         UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);

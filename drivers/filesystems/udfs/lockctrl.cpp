@@ -122,13 +122,17 @@ UDFCommonLockControl(
     TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
     _SEH2_TRY {
 
-        // Validate the sent-in FCB
-        if ( (Fcb == Fcb->Vcb->VolumeDasdFcb) ||
-             (Fcb->FcbState & UDF_FCB_DIRECTORY)) {
+        // Validate the sent-in FCB - file locking not allowed on volumes or directories
+        if ( (TypeOfOpen == UserVolumeOpen) ||
+             (Fcb && (Fcb->FcbState & UDF_FCB_DIRECTORY))) {
 
 //            CompleteRequest = TRUE;
             try_return(RC = STATUS_INVALID_PARAMETER);
@@ -228,11 +232,14 @@ UDFFastLock (
 
     TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
 
-    ASSERT_FCB(Fcb);
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
-    // Validate the sent-in FCB
-    if ( (Fcb == Fcb->Vcb->VolumeDasdFcb) ||
-         (Fcb->FcbState & UDF_FCB_DIRECTORY)) {
+    // Validate the sent-in FCB - file locking not allowed on volumes or directories  
+    if ( (TypeOfOpen == UserVolumeOpen) ||
+         (Fcb && (Fcb->FcbState & UDF_FCB_DIRECTORY))) {
 
         IoStatus->Status = STATUS_INVALID_PARAMETER;
         IoStatus->Information = 0;
@@ -340,11 +347,14 @@ UDFFastUnlockSingle(
 
     TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
 
-    ASSERT_FCB(Fcb);
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
-    // Validate the sent-in FCB
-    if ( (Fcb == Fcb->Vcb->VolumeDasdFcb) ||
-         (Fcb->FcbState & UDF_FCB_DIRECTORY)) {
+    // Validate the sent-in FCB - file locking not allowed on volumes or directories
+    if ( (TypeOfOpen == UserVolumeOpen) ||
+         (Fcb && (Fcb->FcbState & UDF_FCB_DIRECTORY))) {
 
         IoStatus->Status = STATUS_INVALID_PARAMETER;
         return TRUE;
@@ -439,11 +449,14 @@ UDFFastUnlockAll(
 
     TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
 
-    ASSERT_FCB(Fcb);
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
-    // Validate the sent-in FCB
-    if ( (Fcb == Fcb->Vcb->VolumeDasdFcb) ||
-         (Fcb->FcbState & UDF_FCB_DIRECTORY)) {
+    // Validate the sent-in FCB - file locking not allowed on volumes or directories
+    if ( (TypeOfOpen == UserVolumeOpen) ||
+         (Fcb && (Fcb->FcbState & UDF_FCB_DIRECTORY))) {
 
         IoStatus->Status = STATUS_INVALID_PARAMETER;
         return TRUE;
@@ -536,11 +549,14 @@ UDFFastUnlockAllByKey(
 
     TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
 
-    ASSERT_FCB(Fcb);
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
-    // Validate the sent-in FCB
-    if ( (Fcb == Fcb->Vcb->VolumeDasdFcb) ||
-         (Fcb->FcbState & UDF_FCB_DIRECTORY)) {
+    // Validate the sent-in FCB - file locking not allowed on volumes or directories
+    if ( (TypeOfOpen == UserVolumeOpen) ||
+         (Fcb && (Fcb->FcbState & UDF_FCB_DIRECTORY))) {
 
         IoStatus->Status = STATUS_INVALID_PARAMETER;
         return TRUE;
