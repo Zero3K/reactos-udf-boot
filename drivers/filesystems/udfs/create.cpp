@@ -657,25 +657,35 @@ UDFCommonCreate(
                 }
             }
 
-            PtrNewFcb = Vcb->VolumeDasdFcb;
-
-            ASSERT(!(PtrNewFcb->FcbState & UDF_FCB_DELETE_ON_CLOSE));
-
-            RC = UDFOpenFile(IrpContext, IrpSp, Vcb, &PtrNewFcb, UserVolumeOpen, 0);
-
-            if (!NT_SUCCESS(RC))
+            // For volume opens, don't use VolumeDasdFcb. Instead follow FastFAT approach:
+            // Create CCB directly and set FileObject to point to VCB
+            
+            // Create a new CCB structure for volume open
+            PCCB PtrNewCcb = UDFCreateCcb();
+            if (!PtrNewCcb) {
+                AdPrint(("Can't allocate CCB for volume open\n"));
+                RC = STATUS_INSUFFICIENT_RESOURCES;
                 goto op_vol_accs_dnd;
+            }
 
-            PtrNewCcb = UDFDecodeFileObjectCcb(FileObject);
-            if (PtrNewCcb) PtrNewCcb->Flags |= UDF_CCB_VOLUME_OPEN;
+            // Initialize the CCB for volume open (no FCB)
+            PtrNewCcb->Fcb = NULL;  // Volume opens don't have an FCB
+            PtrNewCcb->FileObject = IrpSp->FileObject;
+            PtrNewCcb->Flags |= UDF_CCB_VOLUME_OPEN;
+
+            // Set the file object to point to VCB (like FastFAT)
+            UDFSetFileObject(IrpSp->FileObject, UserVolumeOpen, Vcb, PtrNewCcb);
+            
+            // Set the section object pointer to NULL for volume opens
+            IrpSp->FileObject->SectionObjectPointer = NULL;
             // Check _Security_
             RC = UDFCheckAccessRights(NULL, AccessState, Vcb->RootIndexFcb, PtrNewCcb, DesiredAccess, ShareAccess);
             if (!NT_SUCCESS(RC)) {
                 AdPrint(("    Access violation (Volume)\n"));
                 goto op_vol_accs_dnd;
             }
-            // Check _ShareAccess_
-            RC = UDFCheckAccessRights(FileObject, AccessState, PtrNewFcb, PtrNewCcb, DesiredAccess, ShareAccess);
+            // Check _ShareAccess_ - for volume opens, use RootIndexFcb for share access
+            RC = UDFCheckAccessRights(FileObject, AccessState, Vcb->RootIndexFcb, PtrNewCcb, DesiredAccess, ShareAccess);
             if (!NT_SUCCESS(RC)) {
                 AdPrint(("    Sharing violation (Volume)\n"));
 op_vol_accs_dnd:

@@ -32,13 +32,13 @@ typedef enum _TYPE_OF_OPEN {
 
 } TYPE_OF_OPEN;
 
-_When_(TypeOfOpen == UnopenedFileObject, _At_(Fcb, _In_opt_))
-_When_(TypeOfOpen != UnopenedFileObject, _At_(Fcb, _In_))
+_When_(TypeOfOpen == UnopenedFileObject, _At_(FcbOrVcb, _In_opt_))
+_When_(TypeOfOpen != UnopenedFileObject, _At_(FcbOrVcb, _In_))
 VOID
 UDFSetFileObject (
     _Inout_ PFILE_OBJECT FileObject,
     _In_ TYPE_OF_OPEN TypeOfOpen,
-    PFCB Fcb,
+    PVOID FcbOrVcb,
     _In_opt_ PCCB Ccb
     );
 
@@ -61,6 +61,11 @@ UDFFastDecodeFileObject (
 
 PCCB
 UDFDecodeFileObjectCcb(
+    _In_ PFILE_OBJECT FileObject
+    );
+
+PVCB
+UDFGetVcbFromFileObject(
     _In_ PFILE_OBJECT FileObject
     );
 
