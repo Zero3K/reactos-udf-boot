@@ -2161,12 +2161,10 @@ UDFSetRenameInfo(
     BOOLEAN AcquiredDir1 = FALSE;
     BOOLEAN AcquiredFcb1 = FALSE;
     BOOLEAN SingleDir = TRUE;
-    BOOLEAN UseClose;
 
     PUDF_FILE_INFO FileInfo;
     PUDF_FILE_INFO DirInfo;
     PUDF_FILE_INFO TargetDirInfo;
-    PUDF_FILE_INFO fi;
 
     UNICODE_STRING NewName;
     UNICODE_STRING LocalPath;
