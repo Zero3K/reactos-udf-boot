@@ -206,13 +206,22 @@ UDFCommonWrite(
 
         TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
-        Vcb = Fcb->Vcb;
+        // For UserVolumeOpen, Fcb is NULL - get VCB from FileObject instead
+        if (TypeOfOpen == UserVolumeOpen) {
+            Vcb = UDFGetVcbFromFileObject(IrpSp->FileObject);
+        } else {
+            Vcb = Fcb->Vcb;
+        }
 
         ASSERT_CCB(Ccb);
-        ASSERT_FCB(Fcb);
+        
+        // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+        if (TypeOfOpen != UserVolumeOpen) {
+            ASSERT_FCB(Fcb);
+        }
         ASSERT_VCB(Vcb);
 
-        if (Fcb->FcbState & UDF_FCB_DELETED) {
+        if (TypeOfOpen != UserVolumeOpen && (Fcb->FcbState & UDF_FCB_DELETED)) {
             ASSERT(FALSE);
             try_return(RC = STATUS_TOO_LATE);
         }
@@ -261,7 +270,7 @@ UDFCommonWrite(
         // **********
         // Is this a write of the volume itself ?
         // **********
-        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
+        if (TypeOfOpen == UserVolumeOpen) {
             // Yup, we need to send this on to the disk driver after
             //  validation of the offset and length.
 

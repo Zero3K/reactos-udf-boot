@@ -130,7 +130,11 @@ UDFCommonFlush(
     Vcb = IrpContext->Vcb;
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
     ASSERT_VCB(Vcb);
 
     if (Vcb->VcbState & VCB_STATE_VOLUME_READ_ONLY) {
@@ -177,7 +181,7 @@ UDFCommonFlush(
 
         // Check the type of object passed-in. That will determine the course of
         // action we take.
-        if ((Fcb == Fcb->Vcb->VolumeDasdFcb) || (Fcb->FcbState & UDF_FCB_ROOT_DIRECTORY)) {
+        if ((TypeOfOpen == UserVolumeOpen) || (Fcb && (Fcb->FcbState & UDF_FCB_ROOT_DIRECTORY))) {
 
             Vcb->VcbState |= UDF_VCB_SKIP_EJECT_CHECK;
 
