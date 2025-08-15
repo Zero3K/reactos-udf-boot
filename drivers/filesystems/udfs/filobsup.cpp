@@ -221,17 +221,24 @@ Return Value:
 --*/
 
 {
+    TYPE_OF_OPEN TypeOfOpen;
+    
     PAGED_CODE();
 
     ASSERT_FILE_OBJECT(FileObject);
 
-    //  The Fcb is in the FsContext field.  The type of open is in the low
-    //  bits of the Ccb.
+    //  Get the type of open from the low bits of FsContext2
+    TypeOfOpen = (TYPE_OF_OPEN) FlagOn( (ULONG_PTR) FileObject->FsContext2, TYPE_OF_OPEN_MASK );
 
-    *Fcb = (PFCB)FileObject->FsContext;
+    //  For UserVolumeOpen, FsContext points to VCB, so Fcb should be NULL
+    //  For other opens, FsContext points to FCB
+    if (TypeOfOpen == UserVolumeOpen) {
+        *Fcb = NULL;
+    } else {
+        *Fcb = (PFCB)FileObject->FsContext;
+    }
 
-    return (TYPE_OF_OPEN)
-            FlagOn( (ULONG_PTR) FileObject->FsContext2, TYPE_OF_OPEN_MASK );
+    return TypeOfOpen;
 }
 
 PCCB

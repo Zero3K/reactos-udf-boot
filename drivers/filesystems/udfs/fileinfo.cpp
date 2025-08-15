@@ -204,7 +204,11 @@ UDFCommonQueryInfo(
     TypeOfOpen = UDFDecodeFileObject(FileObject, &Fcb, &Ccb);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
     _SEH2_TRY {
 
@@ -212,7 +216,7 @@ UDFCommonQueryInfo(
 
         // If the caller has opened a logical volume and is attempting to
         // query information for it as a file stream, return an error.
-        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
+        if (TypeOfOpen == UserVolumeOpen) {
             // This is not allowed. Caller must use get/set volume information instead.
             RC = STATUS_INVALID_PARAMETER;
             try_return(RC);
@@ -414,7 +418,11 @@ UDFCommonSetInfo(
     TypeOfOpen = UDFDecodeFileObject(FileObject, &Fcb, &Ccb);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    
+    // For UserVolumeOpen, Fcb is NULL (following FastFAT approach)
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
 
     _SEH2_TRY {
 
@@ -422,7 +430,7 @@ UDFCommonSetInfo(
 
         // If the caller has opened a logical volume and is attempting to
         // query information for it as a file stream, return an error.
-        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
+        if (TypeOfOpen == UserVolumeOpen) {
             // This is not allowed. Caller must use get/set volume information instead.
             RC = STATUS_INVALID_PARAMETER;
             try_return(RC);
