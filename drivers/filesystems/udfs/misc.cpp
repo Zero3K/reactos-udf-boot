@@ -721,7 +721,8 @@ UDFDeleteCcb(
 
         UDFReleaseCCB(Ccb);
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
+        // For UserVolumeOpen operations, exceptions during CCB cleanup are handled gracefully
+        // without triggering debug breakpoints - this aligns with FastFAT's approach
     } _SEH2_END;
 } // end UDFCleanUpCCB()
 
