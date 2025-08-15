@@ -277,13 +277,7 @@ Return Value:
 
     //    FsRtlUninitializeOplock( CdGetFcbOplock(Fcb) );
 
-          if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
-
-              __debugbreak();
-
-              Vcb = Fcb->Vcb;
-              Vcb->VolumeDasdFcb = NULL;
-          }
+          // VolumeDasdFcb logic removed - now using FastFAT approach where UserVolumeOpen has no FCB
 
         UDFDeallocateFcbData(Fcb);
     }
@@ -1288,14 +1282,8 @@ UDFCompleteMount(
 
         //  Now do the volume dasd Fcb.  Create this and reference it in the Vcb.
 
-        UDFLockVcb(IrpContext, Vcb);
-        UnlockVcb = TRUE;
-
-        Vcb->VolumeDasdFcb = UDFCreateFcb(IrpContext, FileId, UDF_NODE_TYPE_DATA, NULL);
-
-        UDFIncrementReferenceCounts(IrpContext, Vcb->VolumeDasdFcb, 1, 1);
-        UDFUnlockVcb(IrpContext, Vcb);
-        UnlockVcb = FALSE;
+        // Calculate the volume size (preserve this logic even though VolumeDasdFcb is removed)
+        // This information might be needed for volume operations
 
         // Iterate through all partitions in the Pcb structure to find the highest sector number (LastSector)
         // occupied by any physical partition. If the end of the current partition exceeds the current LastSector,
@@ -1313,23 +1301,9 @@ UDFCompleteMount(
             }
         }
 
-        Vcb->VolumeDasdFcb->Header.FileSize.QuadPart = Int64ShllMod32(Vcb->LB2B_Bits, LastSector);
-
-        Vcb->VolumeDasdFcb->Header.AllocationSize.QuadPart =
-        Vcb->VolumeDasdFcb->Header.ValidDataLength.QuadPart = Vcb->VolumeDasdFcb->Header.FileSize.QuadPart;
-
-        // Point to the resource.
-
-        Vcb->VolumeDasdFcb->Header.Resource = &Vcb->VolumeDasdFcb->FcbNonpaged->FcbResource;
-        Vcb->VolumeDasdFcb->Header.PagingIoResource = &Vcb->VolumeDasdFcb->FcbNonpaged->FcbPagingIoResource;
-
-        // TODO: use VolumeDasdFcb ?????
-
-        FsRtlSetupAdvancedHeader(&Vcb->VolumeDasdFcb->Header, &Vcb->VolumeDasdFcb->FcbNonpaged->AdvancedFcbHeaderMutex);
-
-        // Mark the Fcb as initialized.
-
-        SetFlag(Vcb->VolumeDasdFcb->FcbState, FCB_STATE_INITIALIZED);
+        // Note: Volume size = Int64ShllMod32(Vcb->LB2B_Bits, LastSector)
+        // (This was previously stored in VolumeDasdFcb->Header.FileSize but is now
+        // calculated on-demand if needed for volume operations)
 
     try_exit:  NOTHING;
     } _SEH2_FINALLY {
@@ -1338,7 +1312,7 @@ UDFCompleteMount(
 
             UDFFreePool((PVOID*)&Vcb->ZBuffer);
 
-            // Vcb->VolumeDasdFcb
+            // VolumeDasdFcb no longer used - now using FastFAT approach
         }
 
         if (UnlockVcb) {

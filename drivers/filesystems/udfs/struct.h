@@ -399,7 +399,8 @@ struct VCB {
     PCWSTR                               DefaultRegName;
     // the volume structure contains a pointer to the root directory FCB
     FCB* RootIndexFcb;
-    FCB* VolumeDasdFcb;
+    // VolumeDasdFcb removed - now using FastFAT approach where UserVolumeOpen 
+    // has no FCB (FileObject->FsContext points directly to VCB)
     // the complete name of the user visible drive letter we serve
     PUCHAR                              PtrVolumePath;
     // Pointer to a stream file object created for the volume information

@@ -523,7 +523,7 @@ UDFCommonCreate(
         // If a Volume open is requested, satisfy it now
         // ****************
         if (!(FileObject->FileName.Length) && (!RelatedFileObject ||
-              (NextFcb == NextFcb->Vcb->VolumeDasdFcb))) {
+              (RelatedTypeOfOpen == UserVolumeOpen))) {
 
             BOOLEAN UndoLock = FALSE;
 
