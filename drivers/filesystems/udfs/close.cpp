@@ -146,7 +146,6 @@ UDFCommonClose(
     BOOLEAN                 AcquiredVcb = FALSE;
     BOOLEAN                 AcquiredGD = FALSE;
     PUDF_FILE_INFO          fi;
-    ULONG                   i = 0;
     BOOLEAN                 PostRequest = FALSE;
     TYPE_OF_OPEN            TypeOfOpen;
     ULONG UserReference = 0;
@@ -269,7 +268,7 @@ UDFCommonClose(
 
         UDFInterlockedDecrement((PLONG)&(Vcb->VcbReference));
 
-        if (!i || (Fcb == Fcb->Vcb->VolumeDasdFcb)) {
+        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
 
             AdPrint(("UDF: Closing volume\n"));
             AdPrint(("UDF: ReferenceCount:  %x\n",Fcb->FcbReference));
