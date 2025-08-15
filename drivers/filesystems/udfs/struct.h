@@ -82,8 +82,6 @@ struct CCB {
     UDFIdentifier                       NodeIdentifier;
     // ptr to the associated FCB
     FCB*                                Fcb;
-    // all CCB structures for a FCB are linked together
-    LIST_ENTRY                          NextCCB;
     // each CCB is associated with a file object
     PFILE_OBJECT                        FileObject;
     // flags (see below) associated with this CCB
@@ -94,7 +92,6 @@ struct CCB {
     //  need to maintain a search pattern
     PUNICODE_STRING                     DirectorySearchPattern;
     HASH_ENTRY                          hashes;
-    ULONG                               TreeLength;
     // Acces rights previously granted to caller's thread
     ACCESS_MASK                         PreviouslyGrantedAccess;
 };
@@ -270,7 +267,6 @@ struct FCB {
     // for the UDF fsd, there exists a 1-1 correspondence between a
     //  full object pathname and a FCB
     PtrUDFObjectName                    FCBName;
-    ERESOURCE                           CcbListResource;
 
     // Pointer to the Fcb non-paged structures.
 
@@ -334,7 +330,6 @@ using PFCB = FCB*;
 #define     UDF_FCB_DELAY_CLOSE                         (0x00002000)
 #define     UDF_FCB_DELETED                             (0x00004000)
 
-#define     UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE       (0x00008000)
 #define     UDF_FCB_POSTED_RENAME                       (0x00010000)
 
 #define     FCB_STATE_INITIALIZED                       (0x00020000)
@@ -404,7 +399,8 @@ struct VCB {
     PCWSTR                               DefaultRegName;
     // the volume structure contains a pointer to the root directory FCB
     FCB* RootIndexFcb;
-    FCB* VolumeDasdFcb;
+    // VolumeDasdFcb removed - now using FastFAT approach where UserVolumeOpen 
+    // has no FCB (FileObject->FsContext points directly to VCB)
     // the complete name of the user visible drive letter we serve
     PUCHAR                              PtrVolumePath;
     // Pointer to a stream file object created for the volume information
@@ -806,7 +802,6 @@ struct IRP_CONTEXT {
     NTSTATUS                        ExceptionStatus;
     // For queued close operation we save Fcb
     FCB*                            Fcb;
-    ULONG                           TreeLength;
 
     // Io context for a read request.
     // Address of Fcb for teardown oplock in create case.
@@ -890,7 +885,6 @@ struct IRP_CONTEXT_LITE {
     ULONG                           UserReference;
     //  Real device object.  This represents the physical device closest to the media.
     PDEVICE_OBJECT                  RealDevice;
-    ULONG                           TreeLength;
 };
 using PIRP_CONTEXT_LITE = IRP_CONTEXT_LITE*;
 

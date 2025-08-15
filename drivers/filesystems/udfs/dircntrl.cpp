@@ -154,9 +154,8 @@ UDFCommonDirControl(
     Vcb = (PVCB)(IrpContext->RealDevice->DeviceExtension);
     ASSERT_VCB(Vcb);
 
-    // Validate the sent-in FCB
-    if ((Fcb == Fcb->Vcb->VolumeDasdFcb) ||
-        !(Fcb->FcbState & UDF_FCB_DIRECTORY)) {
+    // Validate the sent-in FCB - it should be a directory (already verified UserDirectoryOpen above)
+    if (!(Fcb->FcbState & UDF_FCB_DIRECTORY)) {
 
         UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
         return STATUS_INVALID_PARAMETER;

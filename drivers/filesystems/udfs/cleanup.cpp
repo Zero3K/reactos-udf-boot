@@ -159,10 +159,12 @@ UDFCommonCleanup(
     }
 
     //  Keep a local pointer to the Vcb.
-    Vcb = Fcb->Vcb;
+    Vcb = UDFGetVcbFromFileObject(FileObject);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
     ASSERT_VCB(Vcb);
 
     _SEH2_TRY {
@@ -185,9 +187,10 @@ UDFCommonCleanup(
         // and other similar stuff.
         //  BrutePoint();
 
-        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
+        if (TypeOfOpen == UserVolumeOpen) {
             AdPrint(("Cleaning up Volume\n"));
-            AdPrint(("UDF: FcbCleanup: %x\n", Fcb->FcbCleanup));
+            
+            // VCB already obtained from UDFGetVcbFromFileObject above
 
             // For a force dismount, physically disconnect this Vcb from the device so 
             // a new mount can occur.  Vcb deletion cannot happen at this time since 
@@ -223,22 +226,9 @@ UDFCommonCleanup(
                 SendUnlockNotification = TRUE;
             }
 
-            UDFInterlockedDecrement((PLONG)&(Fcb->FcbCleanup));
+            // For volume opens, we don't have FCB-level state to clean up
+            // (following FastFAT approach where UserVolumeOpen has no FCB)
             UDFInterlockedDecrement((PLONG)&(Vcb->VcbCleanup));
-            if (FileObject->Flags & FO_CACHE_SUPPORTED) {
-                // we've cached close
-                UDFInterlockedDecrement((PLONG)&(Fcb->CachedOpenHandleCount));
-            }
-            ASSERT(Fcb->FcbCleanup <= (Fcb->FcbReference-1));
-
-
-            MmPrint(("    CcUninitializeCacheMap()\n"));
-            CcUninitializeCacheMap(FileObject, NULL, NULL);
-
-            //  We must clean up the share access at this time, since we may not
-            //  get a Close call for awhile if the file was mapped through this
-            //  File Object.
-            IoRemoveShareAccess( FileObject, &Fcb->ShareAccess);
 
             try_return(RC = STATUS_SUCCESS);
         }
@@ -633,7 +623,7 @@ DiscardDelete:
         AcquiredParentFCB = FALSE;
         // close the chain
         ASSERT(AcquiredVcb);
-        RC2 = UDFCloseFileInfoChain(IrpContext, Vcb, NextFileInfo, Ccb->TreeLength, TRUE);
+        RC2 = UDFCloseFileInfoChain(IrpContext, Vcb, NextFileInfo, TRUE);
         if (NT_SUCCESS(RC))
             RC = RC2;
 
@@ -695,7 +685,6 @@ UDFCloseFileInfoChain(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
     IN PUDF_FILE_INFO fi,
-    IN ULONG TreeLength,
     IN BOOLEAN VcbAcquired
     )
 {
@@ -710,7 +699,7 @@ UDFCloseFileInfoChain(
         UDFAcquireResourceShared(&(Vcb->VcbResource),TRUE);
 
     AdPrint(("UDFCloseFileInfoChain\n"));
-    for(; TreeLength && fi; TreeLength--) {
+    for(; fi; ) {
 
         // close parent chain (if any)
         // if we started path parsing not from RootDir on Create,

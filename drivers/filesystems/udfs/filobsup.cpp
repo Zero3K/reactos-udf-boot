@@ -11,7 +11,7 @@ VOID
 UDFSetFileObject (
     _Inout_ PFILE_OBJECT FileObject,
     _In_ TYPE_OF_OPEN TypeOfOpen,
-    PFCB Fcb,
+    PVOID FcbOrVcb,
     _In_opt_ PCCB Ccb
     )
 
@@ -64,16 +64,19 @@ Return Value:
 
     // We will or the type of open into the low order bits of FsContext2
     // along with the Ccb value.
-    // The Fcb is stored into the FsContext field.
+    // For UserVolumeOpen, store VCB in FsContext (like FastFAT approach)
+    // For other opens, store FCB in FsContext
 
-    FileObject->FsContext = Fcb;
+    if (TypeOfOpen == UserVolumeOpen) {
+        FileObject->FsContext = FcbOrVcb;  // FcbOrVcb is actually VCB for volume opens
+        FileObject->Vpb = ((PVCB)FcbOrVcb)->Vpb;
+    } else {
+        FileObject->FsContext = FcbOrVcb;  // FcbOrVcb is FCB for file/directory opens  
+        FileObject->Vpb = ((PFCB)FcbOrVcb)->Vcb->Vpb;
+    }
     FileObject->FsContext2 = Ccb;
 
     FileObject->FsContext2 = (VOID*)((ULONG_PTR)FileObject->FsContext2 | TypeOfOpen);
-
-    // Set the Vpb field in the file object.
-
-    FileObject->Vpb = Fcb->Vcb->Vpb;
 
     return;
 }
@@ -129,18 +132,65 @@ Return Value:
     } else {
 
         //
-        //  The Fcb is pointed to by the FsContext field.  The Ccb is in
-        //  FsContext2 (after clearing the low three bits).  The low three
-        //  bits are the file object type.
+        //  The Ccb is in FsContext2 (after clearing the low three bits).  
+        //  The low three bits are the file object type.
+        //  For UserVolumeOpen: FsContext points to VCB and Fcb should be NULL
+        //  For other opens: FsContext points to FCB
         //
 
-        *Fcb = (PFCB)FileObject->FsContext;
         *Ccb = (PCCB)((ULONG_PTR)FileObject->FsContext2 & ~TYPE_OF_OPEN_MASK);
+        
+        if (TypeOfOpen == UserVolumeOpen) {
+            *Fcb = NULL;  // Volume opens don't have an FCB (like FastFAT)
+        } else {
+            *Fcb = (PFCB)FileObject->FsContext;
+        }
     }
 
     //  Now return the type of open.
 
     return TypeOfOpen;
+}
+
+PVCB
+UDFGetVcbFromFileObject(
+    _In_ PFILE_OBJECT FileObject
+    )
+
+/*++
+
+Routine Description:
+
+    This routine extracts the VCB from a FileObject, handling both volume opens
+    (where FsContext points to VCB) and file/directory opens (where FsContext 
+    points to FCB and we get VCB from FCB->Vcb).
+
+Arguments:
+
+    FileObject - Supplies the file object pointer.
+
+Return Value:
+
+    PVCB - Pointer to the VCB, or NULL if unopened file object.
+
+--*/
+
+{
+    TYPE_OF_OPEN TypeOfOpen;
+    
+    PAGED_CODE();
+
+    TypeOfOpen = (TYPE_OF_OPEN) FlagOn( (ULONG_PTR) FileObject->FsContext2,
+                                        TYPE_OF_OPEN_MASK );
+
+    if (TypeOfOpen == UnopenedFileObject) {
+        return NULL;
+    } else if (TypeOfOpen == UserVolumeOpen) {
+        return (PVCB)FileObject->FsContext;  // VCB stored directly
+    } else {
+        PFCB Fcb = (PFCB)FileObject->FsContext;
+        return Fcb->Vcb;  // Get VCB from FCB
+    }
 }
 
 TYPE_OF_OPEN
@@ -171,17 +221,24 @@ Return Value:
 --*/
 
 {
+    TYPE_OF_OPEN TypeOfOpen;
+    
     PAGED_CODE();
 
     ASSERT_FILE_OBJECT(FileObject);
 
-    //  The Fcb is in the FsContext field.  The type of open is in the low
-    //  bits of the Ccb.
+    //  Get the type of open from the low bits of FsContext2
+    TypeOfOpen = (TYPE_OF_OPEN) FlagOn( (ULONG_PTR) FileObject->FsContext2, TYPE_OF_OPEN_MASK );
 
-    *Fcb = (PFCB)FileObject->FsContext;
+    //  For UserVolumeOpen, FsContext points to VCB, so Fcb should be NULL
+    //  For other opens, FsContext points to FCB
+    if (TypeOfOpen == UserVolumeOpen) {
+        *Fcb = NULL;
+    } else {
+        *Fcb = (PFCB)FileObject->FsContext;
+    }
 
-    return (TYPE_OF_OPEN)
-            FlagOn( (ULONG_PTR) FileObject->FsContext2, TYPE_OF_OPEN_MASK );
+    return TypeOfOpen;
 }
 
 PCCB

@@ -277,13 +277,7 @@ Return Value:
 
     //    FsRtlUninitializeOplock( CdGetFcbOplock(Fcb) );
 
-          if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
-
-              __debugbreak();
-
-              Vcb = Fcb->Vcb;
-              Vcb->VolumeDasdFcb = NULL;
-          }
+          // VolumeDasdFcb logic removed - now using FastFAT approach where UserVolumeOpen has no FCB
 
         UDFDeallocateFcbData(Fcb);
     }
@@ -605,7 +599,6 @@ UDFInitializeFCB(
     ASSERT_LOCKED_VCB(Vcb);
 
     AdPrint(("UDFInitializeFCB\n"));
-    NTSTATUS status;
 
     // Fill NT required Fcb part
 
@@ -615,36 +608,13 @@ UDFInitializeFCB(
     FsRtlSetupAdvancedHeader(&Fcb->Header, &Fcb->FcbNonpaged->AdvancedFcbHeaderMutex);
     Fcb->FileLock = NULL;
 
-    if (!NT_SUCCESS(status = UDFInitializeResourceLite(&Fcb->CcbListResource))) {
-
-        AdPrint(("    Can't init resource (3)\n"));
-        BrutePoint();
-
-        UDFDeleteResource(&Fcb->FcbNonpaged->FcbPagingIoResource);
-        UDFDeleteResource(&Fcb->FcbNonpaged->FcbResource);
-        Fcb->Header.Resource = NULL;
-        Fcb->Header.PagingIoResource = NULL;
-
-        if (Fcb->FileLock != NULL) {
-
-            FsRtlFreeFileLock(Fcb->FileLock);
-        }
-
-        return status;
-    }
-
     Fcb->FcbState = Flags;
 
     UDFInsertFcbTable(IrpContext, Fcb);
     SetFlag(Fcb->FcbState, FCB_STATE_IN_FCB_TABLE);
 
-    // initialize the various list heads
-    InitializeListHead(&Fcb->NextCCB);
-
     Fcb->FcbReference = 0;
     Fcb->FcbCleanup = 0;
-
-    SetFlag(Fcb->FcbState, UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE);
 
     Fcb->FCBName = PtrObjectName;
 
@@ -1045,9 +1015,6 @@ UDFCleanUpFCB(
 
         // } end transaction
 
-        if (Fcb->FcbState & UDF_FCB_INITIALIZED_CCB_LIST_RESOURCE)
-            UDFDeleteResource(&(Fcb->CcbListResource));
-
         // Free memory
         UDFDeleteFcb(0, Fcb);
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
@@ -1315,16 +1282,8 @@ UDFCompleteMount(
 
         //  Now do the volume dasd Fcb.  Create this and reference it in the Vcb.
 
-        UDFLockVcb(IrpContext, Vcb);
-        UnlockVcb = TRUE;
-
-        Vcb->VolumeDasdFcb = UDFCreateFcb(IrpContext, FileId, UDF_NODE_TYPE_DATA, NULL);
-
-        InitializeListHead(&Vcb->VolumeDasdFcb->NextCCB);
-
-        UDFIncrementReferenceCounts(IrpContext, Vcb->VolumeDasdFcb, 1, 1);
-        UDFUnlockVcb(IrpContext, Vcb);
-        UnlockVcb = FALSE;
+        // Calculate the volume size (preserve this logic even though VolumeDasdFcb is removed)
+        // This information might be needed for volume operations
 
         // Iterate through all partitions in the Pcb structure to find the highest sector number (LastSector)
         // occupied by any physical partition. If the end of the current partition exceeds the current LastSector,
@@ -1342,23 +1301,9 @@ UDFCompleteMount(
             }
         }
 
-        Vcb->VolumeDasdFcb->Header.FileSize.QuadPart = Int64ShllMod32(Vcb->LB2B_Bits, LastSector);
-
-        Vcb->VolumeDasdFcb->Header.AllocationSize.QuadPart =
-        Vcb->VolumeDasdFcb->Header.ValidDataLength.QuadPart = Vcb->VolumeDasdFcb->Header.FileSize.QuadPart;
-
-        // Point to the resource.
-
-        Vcb->VolumeDasdFcb->Header.Resource = &Vcb->VolumeDasdFcb->FcbNonpaged->FcbResource;
-        Vcb->VolumeDasdFcb->Header.PagingIoResource = &Vcb->VolumeDasdFcb->FcbNonpaged->FcbPagingIoResource;
-
-        // TODO: use VolumeDasdFcb ?????
-
-        FsRtlSetupAdvancedHeader(&Vcb->VolumeDasdFcb->Header, &Vcb->VolumeDasdFcb->FcbNonpaged->AdvancedFcbHeaderMutex);
-
-        // Mark the Fcb as initialized.
-
-        SetFlag(Vcb->VolumeDasdFcb->FcbState, FCB_STATE_INITIALIZED);
+        // Note: Volume size = Int64ShllMod32(Vcb->LB2B_Bits, LastSector)
+        // (This was previously stored in VolumeDasdFcb->Header.FileSize but is now
+        // calculated on-demand if needed for volume operations)
 
     try_exit:  NOTHING;
     } _SEH2_FINALLY {
@@ -1367,7 +1312,7 @@ UDFCompleteMount(
 
             UDFFreePool((PVOID*)&Vcb->ZBuffer);
 
-            // Vcb->VolumeDasdFcb
+            // VolumeDasdFcb no longer used - now using FastFAT approach
         }
 
         if (UnlockVcb) {

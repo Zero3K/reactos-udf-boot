@@ -65,8 +65,8 @@ UDFFastIoCheckIfPossible(
     // Validate that this is a fast-IO request to a regular file.
     // The UDF FSD for example, will not allow fast-IO requests
     // to volume objects, or to directories.
-    if ((Fcb == Fcb->Vcb->VolumeDasdFcb) ||
-         (Fcb->FcbState & UDF_FCB_DIRECTORY)) {
+    if ((TypeOfOpen == UserVolumeOpen) ||
+         (Fcb && (Fcb->FcbState & UDF_FCB_DIRECTORY))) {
         // This is not allowed.
         IoStatus->Status = STATUS_INVALID_PARAMETER;
         MmPrint(("    UDFFastIoCheckIfPossible() TRUE, Failed\n"));
@@ -192,8 +192,7 @@ UDFFastIoQueryBasicInfo(
 
     TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
 
-    ASSERT_FCB(Fcb);
-
+    // Fcb can be NULL for UserVolumeOpen
 
     // if the file is already opended we can satisfy this request
     // immediately 'cause all the data we need must be cached
@@ -201,8 +200,8 @@ UDFFastIoQueryBasicInfo(
 
         _SEH2_TRY {
 
-            if (Fcb == NULL || Fcb == Fcb->Vcb->VolumeDasdFcb) {
-                // This is not allowed.
+            if (TypeOfOpen == UserVolumeOpen) {
+                // Fast I/O not allowed for volume opens.
                 try_return(RC = STATUS_INVALID_PARAMETER);
             }
 
@@ -290,7 +289,7 @@ UDFFastIoQueryStdInfo(
 
     TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
 
-    ASSERT_FCB(Fcb);
+    // Fcb can be NULL for UserVolumeOpen
 
     // if the file is already opended we can satisfy this request
     // immediately 'cause all the data we need must be cached
@@ -298,8 +297,8 @@ UDFFastIoQueryStdInfo(
 
         _SEH2_TRY {
 
-            if (Fcb == NULL || Fcb == Fcb->Vcb->VolumeDasdFcb) {
-                // This is not allowed.
+            if (TypeOfOpen == UserVolumeOpen) {
+                // Fast I/O not allowed for volume opens.
                 try_return(RC = STATUS_INVALID_PARAMETER);
             }
 
@@ -626,7 +625,7 @@ UDFFastIoQueryNetInfo(
 
     TypeOfOpen = UDFFastDecodeFileObject(FileObject, &Fcb);
 
-    ASSERT_FCB(Fcb);
+    // Fcb can be NULL for UserVolumeOpen
 
     // if the file is already opended we can satisfy this request
     // immediately 'cause all the data we need must be cached
@@ -634,8 +633,8 @@ UDFFastIoQueryNetInfo(
 
         _SEH2_TRY {
 
-            if (Fcb == NULL || Fcb == Fcb->Vcb->VolumeDasdFcb) {
-                // This is not allowed.
+            if (TypeOfOpen == UserVolumeOpen) {
+                // Fast I/O not allowed for volume opens.
                 try_return(RC = STATUS_INVALID_PARAMETER);
             }
 

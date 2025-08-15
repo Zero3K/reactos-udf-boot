@@ -180,10 +180,12 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
 
     TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
-    Vcb = Fcb->Vcb;
+    Vcb = UDFGetVcbFromFileObject(IrpSp->FileObject);
 
     ASSERT_CCB(Ccb);
-    ASSERT_FCB(Fcb);
+    if (TypeOfOpen != UserVolumeOpen) {
+        ASSERT_FCB(Fcb);
+    }
     ASSERT_VCB(Vcb);
 
     IoControlCode = IrpSp->Parameters.DeviceIoControl.IoControlCode;
@@ -196,7 +198,7 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
 
     CanWait = FlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT);
 
-    if (!FlagOn(Fcb->FcbState, UDF_FCB_DIRECTORY))
+    if (TypeOfOpen != UserVolumeOpen && !FlagOn(Fcb->FcbState, UDF_FCB_DIRECTORY))
     {
         UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
         UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, CanWait);
@@ -246,7 +248,7 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
         return Status;
     }
 
-    if (Fcb->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_VCB) {
+    if (TypeOfOpen != UserVolumeOpen) {
 
         UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
         UDFPrint(("UDFCommonDevControl -> %08lx\n", STATUS_INVALID_PARAMETER));

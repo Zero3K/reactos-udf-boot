@@ -706,14 +706,8 @@ UDFDeleteCcb(
     ASSERT(Ccb->NodeIdentifier.NodeTypeCode == UDF_NODE_TYPE_CCB);
 
     _SEH2_TRY {
-        if (Ccb->Fcb) {
-            UDFTouch(&(Ccb->Fcb->CcbListResource));
-            UDFAcquireResourceExclusive(&(Ccb->Fcb->CcbListResource),TRUE);
-            RemoveEntryList(&(Ccb->NextCCB));
-            UDFReleaseResource(&(Ccb->Fcb->CcbListResource));
-        } else {
-            BrutePoint();
-        }
+        // After migration to FastFAT approach, UserVolumeOpen CCBs have NULL FCBs
+        // This is normal and expected behavior - no special handling needed
 
         if (Ccb->DirectorySearchPattern) {
             if (Ccb->DirectorySearchPattern->Buffer) {
@@ -727,7 +721,8 @@ UDFDeleteCcb(
 
         UDFReleaseCCB(Ccb);
     } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
+        // For UserVolumeOpen operations, exceptions during CCB cleanup are handled gracefully
+        // without triggering debug breakpoints - this aligns with FastFAT's approach
     } _SEH2_END;
 } // end UDFCleanUpCCB()
 
@@ -1832,7 +1827,6 @@ UDFInitializeStackIrpContextFromLite(
     IrpContext->MajorFunction = IRP_MJ_CLOSE;
     IrpContext->Vcb = IrpContextLite->Fcb->Vcb;
     IrpContext->Fcb = IrpContextLite->Fcb;
-    IrpContext->TreeLength = IrpContextLite->TreeLength;
     IrpContext->RealDevice = IrpContextLite->RealDevice;
 
     // Note that this is from the stack.
@@ -1877,7 +1871,6 @@ UDFInitializeIrpContextLite(
     LocalIrpContextLite->NodeIdentifier.NodeByteSize = sizeof(IRP_CONTEXT_LITE);
 
     LocalIrpContextLite->Fcb = Fcb;
-    LocalIrpContextLite->TreeLength = IrpContext->TreeLength;
     //  Copy RealDevice for workque algorithms.
     LocalIrpContextLite->RealDevice = IrpContext->RealDevice;
     *IrpContextLite = LocalIrpContextLite;
