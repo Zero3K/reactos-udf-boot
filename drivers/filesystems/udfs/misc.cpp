@@ -706,11 +706,8 @@ UDFDeleteCcb(
     ASSERT(Ccb->NodeIdentifier.NodeTypeCode == UDF_NODE_TYPE_CCB);
 
     _SEH2_TRY {
-        if (Ccb->Fcb) {
-            // No longer need to maintain CCB list - FCB reference counting is sufficient
-        } else {
-            BrutePoint();
-        }
+        // After migration to FastFAT approach, UserVolumeOpen CCBs have NULL FCBs
+        // This is normal and expected behavior - no special handling needed
 
         if (Ccb->DirectorySearchPattern) {
             if (Ccb->DirectorySearchPattern->Buffer) {
