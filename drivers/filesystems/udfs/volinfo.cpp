@@ -177,7 +177,10 @@ UDFCommonQueryVolInfo(
         TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
         ASSERT_CCB(Ccb);
-        ASSERT_FCB(Fcb);
+        // FCB is NULL for UserVolumeOpen after FastFAT migration
+        if (TypeOfOpen != UserVolumeOpen) {
+            ASSERT_FCB(Fcb);
+        }
 
         Vcb = (PVCB)(IrpSp->DeviceObject->DeviceExtension);
         ASSERT(Vcb);
@@ -623,7 +626,10 @@ UDFCommonSetVolInfo(
         TypeOfOpen = UDFDecodeFileObject(IrpSp->FileObject, &Fcb, &Ccb);
 
         ASSERT_CCB(Ccb);
-        ASSERT_FCB(Fcb);
+        // FCB is NULL for UserVolumeOpen after FastFAT migration  
+        if (TypeOfOpen != UserVolumeOpen) {
+            ASSERT_FCB(Fcb);
+        }
 
         if (Ccb && Ccb->Fcb && (Ccb->Fcb->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_VCB)) {
             UDFPrint(("    Can't change Label on Non-volume object\n"));
