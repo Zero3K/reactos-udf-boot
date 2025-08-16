@@ -34,6 +34,7 @@
 #endif //UDF_LIMIT_NAME_LEN
 
 #define IFS_40
+// When enabled, makes UDF filesystem appear as NTFS to the system
 //#define PRETEND_NTFS
 
 //#define UDF_ASYNC_IO
@@ -359,8 +360,13 @@ UDFFreePool(
 #define         UDF_PART_DAMAGED_RO                 (0x01)
 #define         UDF_PART_DAMAGED_NO                 (0x02)
 
+#ifdef PRETEND_NTFS
+#define         UDF_FS_NAME_CD              L"\\Ntfs"
+#define         UDF_FS_NAME_HDD             L"\\Ntfs"
+#else
 #define         UDF_FS_NAME_CD              L"\\UdfCd"
 #define         UDF_FS_NAME_HDD             L"\\UdfHdd"
+#endif
 
 #define         UDF_ROOTDIR_NAME            L"\\"
 
