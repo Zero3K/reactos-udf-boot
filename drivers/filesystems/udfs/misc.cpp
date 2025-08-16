@@ -165,10 +165,16 @@ try_exit:   NOTHING;
 *************************************************************************/
 VOID UDFDestroyZones(VOID)
 {
+    UDFPrint(("UDF: UDFDestroyZones\n"));
+    
+    // Delete all initialized lookaside lists to prevent Driver Verifier errors
     ExDeleteNPagedLookasideList(&UdfData.IrpContextLookasideList);
     ExDeleteNPagedLookasideList(&UdfData.ObjectNameLookasideList);
     ExDeleteNPagedLookasideList(&UdfData.NonPagedFcbLookasideList);
-
+    ExDeleteNPagedLookasideList(&UdfData.UDFNonPagedFcbLookasideList);
+    
+    ExDeletePagedLookasideList(&UdfData.UDFFcbIndexLookasideList);
+    ExDeletePagedLookasideList(&UdfData.UDFFcbDataLookasideList);
     ExDeletePagedLookasideList(&UdfData.CcbLookasideList);
 }
 

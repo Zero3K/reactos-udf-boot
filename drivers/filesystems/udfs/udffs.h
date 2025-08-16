@@ -360,13 +360,10 @@ UDFFreePool(
 #define         UDF_PART_DAMAGED_RO                 (0x01)
 #define         UDF_PART_DAMAGED_NO                 (0x02)
 
-#ifdef PRETEND_NTFS
-#define         UDF_FS_NAME_CD              L"\\Ntfs"
-#define         UDF_FS_NAME_HDD             L"\\Ntfs"
-#else
+// Device names always remain UDF to avoid conflicts with real NTFS driver
+// PRETEND_NTFS only affects filesystem titles, not device names
 #define         UDF_FS_NAME_CD              L"\\UdfCd"
 #define         UDF_FS_NAME_HDD             L"\\UdfHdd"
-#endif
 
 #define         UDF_ROOTDIR_NAME            L"\\"
 
