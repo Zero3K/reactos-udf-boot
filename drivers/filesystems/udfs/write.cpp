@@ -658,10 +658,13 @@ UDFCommonWrite(
                     FALSE,      // We will not utilize pin access for this file
                     &(UdfData.CacheMgrCallBacks), // callbacks
                     Fcb);       // The context used in callbacks
+                    
                 MmPrint(("    CcSetReadAheadGranularity()\n"));
                 // Use smaller read-ahead granularity for streams to improve performance
                 if (UDFIsAStream(Fcb->FileInfo)) {
                     CcSetReadAheadGranularity(FileObject, STREAM_READ_AHEAD_GRANULARITY);
+                    // Streams benefit from smaller dirty page threshold for more responsive flushing
+                    CcSetDirtyPageThreshold(FileObject, 8);  // 8 pages instead of default 16+
                 } else {
                     CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
                 }

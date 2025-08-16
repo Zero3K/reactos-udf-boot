@@ -62,6 +62,9 @@
 // Stream allocation alignment for better performance (smaller alignment)
 #define STREAM_ALLOCATION_ALIGNMENT      (0x1000)
 
+// Small stream optimization threshold - operations below this size get fast path
+#define STREAM_SMALL_IO_THRESHOLD        (0x800)   // 2KB
+
 #define UDF_DEFAULT_SPARSE_THRESHOLD (256*PACKETSIZE_UDF)
 
 #define ALLOW_SPARSE
