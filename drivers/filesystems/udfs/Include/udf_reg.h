@@ -35,6 +35,7 @@
 #endif //PRETEND_NTFS
 
 #define         UDF_FS_TITLE_BLANK          L"Blank media"
+#define         UDF_FS_TITLE_UNKNOWN        L"Unknown"
 #define         UDF_BLANK_VOLUME_LABEL      L"Blank CD"
 #define         REG_USEEXTENDEDFE_NAME      L"UseExtendedFE"
 #define         REG_DEFALLOCMODE_NAME       L"DefaultAllocMode"

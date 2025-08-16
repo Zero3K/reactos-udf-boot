@@ -518,9 +518,23 @@ UDFQueryFsAttributeInfo(
                 FsTypeTitle = UDF_FS_TITLE_##tit; \
                 FsTypeTitleLen = sizeof(UDF_FS_TITLE_##tit) - sizeof(WCHAR);
 
-    // Use HDD title as default since comprehensive media type detection
-    // is not implemented in this refactored version
-    UDFSetFsTitle(HDD);
+    switch(Vcb->TargetDeviceObject->DeviceType) {
+    case FILE_DEVICE_CD_ROM: {
+        // For CD/DVD devices, use appropriate title based on available information
+        // In this refactored version, comprehensive media type detection is not
+        // implemented, so we use a reasonable default based on read-only status
+        if(Vcb->VcbState & VCB_STATE_VOLUME_READ_ONLY) {
+            UDFSetFsTitle(CDROM);
+        } else {
+            UDFSetFsTitle(CDRW);
+        }
+        break;
+    }
+    default: {
+        UDFSetFsTitle(HDD);
+        break;
+    }
+    }
 
 #undef UDFSetFsTitle
 
