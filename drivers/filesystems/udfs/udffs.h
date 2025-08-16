@@ -36,7 +36,7 @@
 #define IFS_40
 //#define PRETEND_NTFS
 
-//#define UDF_ASYNC_IO
+#define UDF_ASYNC_IO
 
 // WCACHE was disabled due to errors in it.
 // Test case: Running 'git clone https://github.com/reactos/reactos' under ReactOS results in an error.
@@ -46,13 +46,21 @@
 
 #ifndef UDF_LIMIT_DIR_SIZE
     #define UDF_DEFAULT_DIR_PACK_THRESHOLD (128)
+    // Stream directories benefit from smaller packing threshold for better performance
+    #define UDF_STREAM_DIR_PACK_THRESHOLD (64)
 #else // UDF_LIMIT_DIR_SIZE
     #define UDF_DEFAULT_DIR_PACK_THRESHOLD (16)
+    #define UDF_STREAM_DIR_PACK_THRESHOLD (8)
 #endif // UDF_LIMIT_DIR_SIZE
 
 // Read ahead amount used for normal data files
-
 #define READ_AHEAD_GRANULARITY           (0x10000)
+
+// Read ahead amount used for stream files (smaller for better performance)
+#define STREAM_READ_AHEAD_GRANULARITY    (0x4000)
+
+// Stream allocation alignment for better performance (smaller alignment)
+#define STREAM_ALLOCATION_ALIGNMENT      (0x1000)
 
 #define UDF_DEFAULT_SPARSE_THRESHOLD (256*PACKETSIZE_UDF)
 
@@ -86,7 +94,7 @@
 #define UDF_ALLOW_HARD_LINKS
 
 #ifdef UDF_ALLOW_HARD_LINKS
-//#define UDF_ALLOW_LINKS_TO_STREAMS
+#define UDF_ALLOW_LINKS_TO_STREAMS
 #endif //UDF_ALLOW_HARD_LINKS
 
 //#define UDF_ALLOW_PRETEND_DELETED

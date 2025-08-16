@@ -599,7 +599,12 @@ UDFCommonRead(
                     &(UdfData.CacheMgrCallBacks), // callbacks
                     Fcb);        // The context used in callbacks
                 MmPrint(("    CcSetReadAheadGranularity()\n"));
-                CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
+                // Use smaller read-ahead granularity for streams to improve performance
+                if (UDFIsAStream(Fcb->FileInfo)) {
+                    CcSetReadAheadGranularity(FileObject, STREAM_READ_AHEAD_GRANULARITY);
+                } else {
+                    CcSetReadAheadGranularity(FileObject, READ_AHEAD_GRANULARITY);
+                }
             }
 
             // Check and see if this request requires a MDL returned to the caller
