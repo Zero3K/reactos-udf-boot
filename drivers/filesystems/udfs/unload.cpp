@@ -27,6 +27,15 @@ UDFDriverUnload(
     // prevent mount oparations
     UdfData.Flags |= UDF_DATA_FLAGS_SHUTDOWN;
 
+    // Clean up allocated resources before entering wait loop
+    if (UdfData.SavedRegPath.Buffer) {
+        UDFPrint(("UDF: Freeing SavedRegPath.Buffer\n"));
+        MyFreePool__(UdfData.SavedRegPath.Buffer);
+        UdfData.SavedRegPath.Buffer = NULL;
+        UdfData.SavedRegPath.Length = 0;
+        UdfData.SavedRegPath.MaximumLength = 0;
+    }
+
     // wait for all volumes to be dismounted
     delay.QuadPart = 10*1000*1000*10;
     while(TRUE) {
