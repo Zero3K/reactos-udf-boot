@@ -514,16 +514,15 @@ UDFQueryFsAttributeInfo(
     *Length &= ~1;
     //  Determine how much of the file system name will fit.
 
-#define UDF_FS_TITLE_UDF L"UDF"
-
 #define UDFSetFsTitle(tit) \
                 FsTypeTitle = UDF_FS_TITLE_##tit; \
                 FsTypeTitleLen = sizeof(UDF_FS_TITLE_##tit) - sizeof(WCHAR);
 
-    UDFSetFsTitle(UDF);
+    // Use HDD title as default since comprehensive media type detection
+    // is not implemented in this refactored version
+    UDFSetFsTitle(HDD);
 
 #undef UDFSetFsTitle
-#undef UDF_FS_TITLE_UDF
 
     if (*Length >= FsTypeTitleLen) {
         BytesToCopy = FsTypeTitleLen;
