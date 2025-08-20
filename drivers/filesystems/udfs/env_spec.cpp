@@ -416,6 +416,7 @@ try_exit: NOTHING;
     IoWriteTime += (IoExitTime-IoEnterTime);
     if (WrittenData > 1024*1024*8) {
         PerfPrint(("\nUDFPhWriteSynchronous() Relative size=%I64d, time=%I64d.\n", WrittenData, IoRelWriteTime));
+        UDFWritePerformanceLog(); // Write performance log to system drive
         WrittenData = IoRelWriteTime = 0;
     }
     WrittenData += Length;
@@ -640,4 +641,100 @@ UDFNotifyFullReportChange(
                                 Action,
                                 NULL);
 }
+
+#ifdef MEASURE_IO_PERFORMANCE
+/*************************************************************************
+*
+* Function: UDFWritePerformanceLog()
+*
+* Description:
+*   Write performance statistics to a log file in the system drive root
+*
+* Return Value: NTSTATUS
+*
+*************************************************************************/
+NTSTATUS
+UDFWritePerformanceLog(
+    VOID
+    )
+{
+    NTSTATUS Status;
+    HANDLE FileHandle = NULL;
+    UNICODE_STRING FileName;
+    OBJECT_ATTRIBUTES ObjectAttributes;
+    IO_STATUS_BLOCK IoStatusBlock;
+    CHAR Buffer[512];
+    ULONG BufferLength;
+    LARGE_INTEGER ByteOffset;
+
+    // Initialize file name for performance log in system drive root
+    RtlInitUnicodeString(&FileName, L"\\??\\C:\\udfs_performance.log");
+    
+    InitializeObjectAttributes(&ObjectAttributes,
+                              &FileName,
+                              OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+                              NULL,
+                              NULL);
+
+    // Create or open the log file
+    Status = ZwCreateFile(&FileHandle,
+                         GENERIC_WRITE | SYNCHRONIZE,
+                         &ObjectAttributes,
+                         &IoStatusBlock,
+                         NULL,
+                         FILE_ATTRIBUTE_NORMAL,
+                         FILE_SHARE_READ,
+                         FILE_OPEN_IF,
+                         FILE_SYNCHRONOUS_IO_NONALERT | FILE_APPEND_DATA,
+                         NULL,
+                         0);
+
+    if (!NT_SUCCESS(Status)) {
+        UDFPrint(("UDFWritePerformanceLog: Failed to create/open log file, Status = 0x%08X\n", Status));
+        return Status;
+    }
+
+    // Format performance data
+    BufferLength = sprintf(Buffer,
+        "UDFS Performance Statistics:\r\n"
+        "Total Read Time: %I64d (100ns units)\r\n" 
+        "Total Write Time: %I64d (100ns units)\r\n"
+        "Total Written Data: %I64d bytes\r\n"
+        "Relative Write Time: %I64d (100ns units)\r\n"
+        "---\r\n",
+        IoReadTime,
+        IoWriteTime, 
+        WrittenData,
+        IoRelWriteTime);
+
+    if (BufferLength >= sizeof(Buffer)) {
+        BufferLength = sizeof(Buffer) - 1;
+    }
+
+    // Write to file (file is opened with FILE_APPEND_DATA so it will append)
+    ByteOffset.LowPart = FILE_WRITE_TO_END_OF_FILE;
+    ByteOffset.HighPart = -1;
+    
+    Status = ZwWriteFile(FileHandle,
+                        NULL,
+                        NULL,
+                        NULL,
+                        &IoStatusBlock,
+                        Buffer,
+                        BufferLength,
+                        &ByteOffset,
+                        NULL);
+
+    if (!NT_SUCCESS(Status)) {
+        UDFPrint(("UDFWritePerformanceLog: Failed to write to log file, Status = 0x%08X\n", Status));
+    } else {
+        UDFPrint(("UDFWritePerformanceLog: Successfully wrote performance log\n"));
+    }
+
+    // Close the file handle
+    ZwClose(FileHandle);
+
+    return Status;
+}
+#endif //MEASURE_IO_PERFORMANCE
 

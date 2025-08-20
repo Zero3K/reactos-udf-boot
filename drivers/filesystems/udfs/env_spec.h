@@ -102,5 +102,8 @@ NTSTATUS NTAPI UDFSyncCompletionRoutine2(IN PDEVICE_OBJECT DeviceObject,
 
 #define UDFGetDevType(DevObj)    (DevObj->DeviceType)
 
+#ifdef MEASURE_IO_PERFORMANCE
+extern NTSTATUS UDFWritePerformanceLog(VOID);
+#endif //MEASURE_IO_PERFORMANCE
 
 #endif  // _UDF_ENV_SPEC_H_
