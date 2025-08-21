@@ -119,7 +119,7 @@ UDFCommonShutdown(
     NTSTATUS Status;
     PVCB Vcb;
     PLIST_ENTRY Link;
-    LARGE_INTEGER delay;
+    BOOLEAN VcbPresent = TRUE;
 
     PAGED_CODE();
 
@@ -186,23 +186,6 @@ UDFCommonShutdown(
 
             UDFFlushVolume(IrpContext, Vcb);
 
-#ifdef UDF_DELAYED_CLOSE
-            UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE);
-            UDFPrint(("    UDFCommonShutdown:     set UDF_VCB_FLAGS_NO_DELAYED_CLOSE\n"));
-            Vcb->VcbState |= UDF_VCB_FLAGS_NO_DELAYED_CLOSE;
-            UDFReleaseResource(&(Vcb->VcbResource));
-#endif //UDF_DELAYED_CLOSE
-
-            if (Vcb->RootIndexFcb && Vcb->RootIndexFcb->FileInfo) {
-                UDFPrint(("    UDFCommonShutdown:     UDFCloseAllSystemDelayedInDir\n"));
-                Status = UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-                ASSERT(NT_SUCCESS(Status));
-            }
-
-#ifdef UDF_DELAYED_CLOSE
-            UDFFspClose(Vcb);
-#endif //UDF_DELAYED_CLOSE
-
             ASSERT(!Vcb->OverflowQueueCount);
 
             {
@@ -239,24 +222,21 @@ UDFCommonShutdown(
 
             ASSERT(!Vcb->OverflowQueueCount);
 
-            if (!(Vcb->VcbState & VCB_STATE_SHUTDOWN)) {
+            SetFlag(Vcb->VcbState, VCB_STATE_SHUTDOWN);
 
-                UDFDoDismountSequence(Vcb, FALSE);
-                if (Vcb->VcbState & VCB_STATE_REMOVABLE_MEDIA) {
-                    // let drive flush all data before reset
-                    delay.QuadPart = -10000000; // 1 sec
-                    KeDelayExecutionThread(KernelMode, FALSE, &delay);
-                }
+            // Attempt to punch the volume down.
 
-                SetFlag(Vcb->VcbState, VCB_STATE_SHUTDOWN);
+            VcbPresent = UDFCheckForDismount(IrpContext, Vcb, FALSE);
+
+            if (VcbPresent) {
+
+                UDFReleaseVcb(IrpContext, Vcb);
             }
-
-            UDFReleaseVcb(IrpContext, Vcb);
         }
 
         // Once we have processed all the mounted logical volumes, we can release
         // all acquired global resources and leave (in peace :-)
-        UDFReleaseResource( &(UdfData.GlobalDataResource) );
+        UDFReleaseUdfData(IrpContext);
 
         // Now, delete any device objects, etc. we may have created
         IoUnregisterFileSystem(UdfData.UDFDeviceObject_CD);
@@ -279,7 +259,7 @@ UDFCommonShutdown(
         // delete the resource we may have initialized
         if (UdfData.Flags & UDF_DATA_FLAGS_RESOURCE_INITIALIZED) {
             // un-initialize this resource
-            UDFDeleteResource(&(UdfData.GlobalDataResource));
+            UDFDeleteResource(&UdfData.GlobalDataResource);
             ClearFlag(UdfData.Flags, UDF_DATA_FLAGS_RESOURCE_INITIALIZED);
         }
 

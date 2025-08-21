@@ -75,7 +75,7 @@ DriverEntry(
 
             // initialize the global data resource and remember the fact that
             //  the resource has been initialized
-            RC = UDFInitializeResourceLite(&(UdfData.GlobalDataResource));
+            RC = UDFInitializeResourceLite(&UdfData.GlobalDataResource);
             ASSERT(NT_SUCCESS(RC));
             SetFlag(UdfData.Flags, UDF_DATA_FLAGS_RESOURCE_INITIALIZED);
 
@@ -217,7 +217,7 @@ DriverEntry(
             // delete the resource we may have initialized
             if (UdfData.Flags & UDF_DATA_FLAGS_RESOURCE_INITIALIZED) {
                 // un-initialize this resource
-                UDFDeleteResource(&(UdfData.GlobalDataResource));
+                UDFDeleteResource(&UdfData.GlobalDataResource);
                 ClearFlag(UdfData.Flags, UDF_DATA_FLAGS_RESOURCE_INITIALIZED);
             }
 //        } else {

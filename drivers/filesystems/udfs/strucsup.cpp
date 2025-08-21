@@ -964,13 +964,16 @@ UDFInitializeVCB(
 
     // Intilize FCB for this VCB
 
-    // Set the initial file size values appropriately. Note that our FSD may
-    // wish to guess at the initial amount of information we would like to
-    // read from the disk until we have really determined that this a valid
-    // logical volume (on disk) that we wish to mount.
-    // Vcb->FileSize = Vcb->AllocationSize = ??
+    // Refererence the Vcb for two reasons.  The first is a reference
+    // that prevents the Vcb from going away on the last close unless
+    // dismount has already occurred.  The second is to make sure
+    // we don't go into the dismount path on any error during mount
+    // until we get to the Mount cleanup.
 
-    Vcb->VcbReference = 1;
+    Vcb->VcbResidualReference = UDFS_BASE_RESIDUAL_REFERENCE;
+    Vcb->VcbResidualUserReference = UDFS_BASE_RESIDUAL_USER_REFERENCE;
+
+    Vcb->VcbReference = 1 + Vcb->VcbResidualReference;
 
     Vcb->WCacheMaxBlocks        = UdfData.WCacheMaxBlocks;
     Vcb->WCacheMaxFrames        = UdfData.WCacheMaxFrames;
@@ -989,17 +992,15 @@ UDFInitializeVCB(
 
     //Vcb->PtrStreamFileObject->Vpb = PtrVPB;
 
-    // Link this chap onto the global linked list of all VCB structures.
-    // We consider that GlobalDataResource was acquired in past
-    UDFAcquireResourceExclusive(&(UdfData.GlobalDataResource), TRUE);
+    // Insert this Vcb record on the CdData.VcbQueue.
+
+    ASSERT_EXCLUSIVE_CDDATA;
     InsertTailList(&(UdfData.VcbQueue), &(Vcb->NextVCB));
 
     // Initialize caching for the stream file object.
     //CcInitializeCacheMap(Vcb->PtrStreamFileObject, (PCC_FILE_SIZES)(&(Vcb->AllocationSize)),
     //                            TRUE,       // We will use pinned access.
     //                            &(UDFGlobalData.CacheMgrCallBacks), Vcb);
-
-    UDFReleaseResource(&(UdfData.GlobalDataResource));
 
     // Mark the fact that this VCB structure is initialized.
     Vcb->VcbState |= UDF_VCB_FLAGS_VCB_INITIALIZED;

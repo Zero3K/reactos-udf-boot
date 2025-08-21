@@ -135,11 +135,11 @@ extern NTSTATUS NTAPI UDFClose(
 PDEVICE_OBJECT              DeviceObject,       // the logical volume device object
 PIRP                        Irp);               // I/O Request Packet
 
+_Requires_lock_held_(_Global_critical_region_)
 NTSTATUS
 UDFCommonClose(
     PIRP_CONTEXT IrpContext,
-    PIRP Irp,
-    BOOLEAN CanWait
+    PIRP Irp
     );
 
 _Requires_lock_held_(_Global_critical_region_)
@@ -156,16 +156,6 @@ NTAPI
 UDFFspClose(
     _In_opt_ PVCB Vcb
     );
-
-extern NTSTATUS UDFCloseAllXXXDelayedInDir(IN PVCB           Vcb,
-                                           IN PUDF_FILE_INFO FileInfo,
-                                           IN BOOLEAN        System);
-
-#define UDFCloseAllDelayedInDir(Vcb,FI) \
-    UDFCloseAllXXXDelayedInDir(Vcb,FI,FALSE);
-
-#define UDFCloseAllSystemDelayedInDir(Vcb,FI) \
-    UDFCloseAllXXXDelayedInDir(Vcb,FI,TRUE);
 
 NTSTATUS
 UDFQueueClose(
@@ -794,9 +784,11 @@ UDFGetCfgParameter(
     IN ULONG DefValue
     );
 
-extern VOID UDFDeleteVCB(
+VOID
+UDFDeleteVCB(
     PIRP_CONTEXT IrpContext,
-    PVCB Vcb);
+    PVCB Vcb
+    );
 
 extern ULONG UDFRegCheckParameterValue(
     IN PUNICODE_STRING RegistryPath,
@@ -1146,7 +1138,8 @@ UDFGetTrialEnd(PULONG iTrial);
 * Prototypes for the file verify.cpp
 *************************************************************************/
 
-extern NTSTATUS UDFVerifyVcb (
+VOID
+UDFVerifyVcb(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb
     );
@@ -1156,30 +1149,33 @@ UDFVerifyFcbOperation(
     IN PIRP_CONTEXT IrpContext OPTIONAL,
     IN PFCB Fcb,
     IN PCCB Ccb
-);
+    );
 
-NTSTATUS UDFVerifyVolume (
+NTSTATUS
+UDFVerifyVolume(
     IN PIRP_CONTEXT IrpContext,
     IN PIRP Irp
     );
 
-extern NTSTATUS UDFPerformVerify (
+NTSTATUS
+UDFPerformVerify(
     IN PIRP_CONTEXT IrpContext,
     IN PIRP Irp,
     IN PDEVICE_OBJECT DeviceToVerify
     );
 
-extern BOOLEAN UDFCheckForDismount (
+BOOLEAN
+UDFCheckForDismount(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
-    IN BOOLEAN VcbAcquired
+    IN BOOLEAN Force
     );
 
 BOOLEAN
-UDFDismountVcb (
+UDFDismountVcb(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
-    IN BOOLEAN VcbAcquired
+    IN IN BOOLEAN FlushBeforeDismount
     );
 
 NTSTATUS

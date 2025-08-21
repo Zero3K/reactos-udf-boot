@@ -482,9 +482,8 @@ UDFCommonCreate(
 
         // Disk based file systems might decide to verify the logical volume
         //  (if required and only if removable media are supported) at this time
-        RC = UDFVerifyVcb(IrpContext,Vcb);
-        if (!NT_SUCCESS(RC))
-            try_return(RC);
+
+        UDFVerifyVcb(IrpContext, Vcb);
 
         UDFConvertExclusiveToSharedLite(&(Vcb->VcbResource));
 
@@ -632,8 +631,6 @@ UDFCommonCreate(
                     UDFInterlockedIncrement((PLONG)&(Vcb->VcbReference));
                     UDFReleaseResource(&(Vcb->VcbResource));
                     AcquiredVcb = FALSE;
-
-                    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
 
 #ifdef UDF_DELAYED_CLOSE
                     UDFFspClose(Vcb);

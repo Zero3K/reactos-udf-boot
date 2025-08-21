@@ -636,7 +636,7 @@ try_exit:   NOTHING;
                 if (NT_SUCCESS(RC)) {
 
                     if (FunctionalityRequested == FileDispositionInformation) {
-                        UDFRemoveFromDelayedQueue(Fcb);
+                        UDFFspClose(Vcb);
                     }
                 }
 #endif //UDF_DELAYED_CLOSE
@@ -2087,29 +2087,7 @@ UDFPrepareForRenameMoveLink(
     // At first, make system to issue last Close request
     // for our Source & Target ...
     // we needn't flush/purge for Source on HLink
-    UDFRemoveFromSystemDelayedQueue(Dir2->Fcb);
-    if (!HardLink && (Dir2 != Dir1))
-        UDFRemoveFromSystemDelayedQueue(File1->Fcb);
-
-#ifdef UDF_DELAYED_CLOSE
-    _SEH2_TRY {
-        // Do actual close for all "delayed close" calls
-
-        // ... and now remove the rest from our queue
-        if (!HardLink) {
-            UDFCloseAllDelayedInDir(Vcb, Dir1);
-            if (Dir2 != Dir1)
-                UDFCloseAllDelayedInDir(Vcb, Dir2);
-        } else {
-            UDFCloseAllDelayedInDir(Vcb, Dir2);
-        }
-
-    } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-        BrutePoint();
-        UDFInterlockedDecrement((PLONG)&Vcb->VcbReference);
-        return (STATUS_DRIVER_INTERNAL_ERROR);
-    } _SEH2_END;
-#endif //UDF_DELAYED_CLOSE
+    UDFFspClose(Vcb);
 
     (*SingleDir) = ((Dir1 == Dir2) && (Dir1->Fcb));
 
