@@ -424,6 +424,11 @@ UDFTeardownStructures(
             ASSERT(ParentFcb);
 
             UDF_CHECK_PAGING_IO_RESOURCE(ParentFcb);
+            // Add critical assertions for resource corruption in close path
+            NT_ASSERT(ParentFcb->FcbNonpaged != NULL);
+            NT_ASSERT(ParentFcb->FcbNonpaged->NodeTypeCode == UDF_NODE_TYPE_FCB_NONPAGED);
+            NT_ASSERT((*((PULONG)&ParentFcb->FcbNonpaged->FcbResource)) != 0);
+            NT_ASSERT(KeGetCurrentIrql() <= APC_LEVEL);
             UDFAcquireResourceExclusive(&ParentFcb->FcbNonpaged->FcbResource,TRUE);
 
         }
@@ -437,6 +442,11 @@ UDFTeardownStructures(
         _SEH2_TRY {
 #endif // UDF_DBG
             UDF_CHECK_PAGING_IO_RESOURCE(CurrentFcb);
+            // Add critical assertions for resource corruption in close path
+            NT_ASSERT(CurrentFcb->FcbNonpaged != NULL);
+            NT_ASSERT(CurrentFcb->FcbNonpaged->NodeTypeCode == UDF_NODE_TYPE_FCB_NONPAGED);
+            NT_ASSERT((*((PULONG)&CurrentFcb->FcbNonpaged->FcbResource)) != 0);
+            NT_ASSERT(KeGetCurrentIrql() <= APC_LEVEL);
             UDFAcquireResourceExclusive(&CurrentFcb->FcbNonpaged->FcbResource,TRUE);
 #ifdef UDF_DBG
         } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {

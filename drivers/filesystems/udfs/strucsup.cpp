@@ -1043,6 +1043,15 @@ UDFCleanUpFCB(
     if (!Fcb) return;
 
     ASSERT_FCB(Fcb);
+    
+    // Add additional assertions to catch resource corruption during cleanup
+    NT_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+    if (Fcb->FcbNonpaged != NULL) {
+        NT_ASSERT(Fcb->FcbNonpaged->NodeTypeCode == UDF_NODE_TYPE_FCB_NONPAGED);
+        // Verify resource structure integrity
+        NT_ASSERT((*((PULONG)&Fcb->FcbNonpaged->FcbResource)) != 0);
+        NT_ASSERT((*((PULONG)&Fcb->FcbNonpaged->FcbPagingIoResource)) != 0);
+    }
 
     _SEH2_TRY {
         // Deinitialize FCBName field
