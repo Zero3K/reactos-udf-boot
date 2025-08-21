@@ -26,6 +26,43 @@ LONGLONG IoReadTime=0;
 LONGLONG IoWriteTime=0;
 LONGLONG WrittenData=0;
 LONGLONG IoRelWriteTime=0;
+
+// Function-level performance tracking variables
+LONGLONG UDFCreateTime=0;
+LONGLONG UDFReadTime=0;
+LONGLONG UDFWriteTime=0;
+LONGLONG UDFCloseTime=0;
+LONGLONG UDFCleanupTime=0;
+LONGLONG UDFDirControlTime=0;
+LONGLONG UDFQueryInfoTime=0;
+LONGLONG UDFSetInfoTime=0;
+
+// Function call counters
+ULONG UDFCreateCount=0;
+ULONG UDFReadCount=0;
+ULONG UDFWriteCount=0;
+ULONG UDFCloseCount=0;
+ULONG UDFCleanupCount=0;
+ULONG UDFDirControlCount=0;
+ULONG UDFQueryInfoCount=0;
+ULONG UDFSetInfoCount=0;
+
+// Macros for function performance measurement
+#define UDF_PERF_START(funcname) \
+    LONGLONG FuncStartTime; \
+    KeQuerySystemTime((PLARGE_INTEGER)&FuncStartTime); \
+    UDF##funcname##Count++;
+
+#define UDF_PERF_END(funcname) \
+    do { \
+        LONGLONG FuncEndTime; \
+        KeQuerySystemTime((PLARGE_INTEGER)&FuncEndTime); \
+        UDF##funcname##Time += (FuncEndTime - FuncStartTime); \
+    } while(0)
+
+#else
+#define UDF_PERF_START(funcname)
+#define UDF_PERF_END(funcname)
 #endif //MEASURE_IO_PERFORMANCE
 
 #ifdef DBG
@@ -663,7 +700,7 @@ UDFWritePerformanceLog(
     UNICODE_STRING FileName;
     OBJECT_ATTRIBUTES ObjectAttributes;
     IO_STATUS_BLOCK IoStatusBlock;
-    CHAR Buffer[512];
+    CHAR Buffer[1024];  // Increased buffer size for more data
     ULONG BufferLength;
     LARGE_INTEGER ByteOffset;
 
@@ -697,15 +734,33 @@ UDFWritePerformanceLog(
     // Format performance data
     BufferLength = sprintf(Buffer,
         "UDFS Performance Statistics:\r\n"
+        "=== I/O Performance ===\r\n"
         "Total Read Time: %I64d (100ns units)\r\n" 
         "Total Write Time: %I64d (100ns units)\r\n"
         "Total Written Data: %I64d bytes\r\n"
         "Relative Write Time: %I64d (100ns units)\r\n"
+        "\r\n=== Function Performance ===\r\n"
+        "UDFCreate: %u calls, %I64d (100ns units), avg: %I64d\r\n"
+        "UDFRead: %u calls, %I64d (100ns units), avg: %I64d\r\n"
+        "UDFWrite: %u calls, %I64d (100ns units), avg: %I64d\r\n"
+        "UDFClose: %u calls, %I64d (100ns units), avg: %I64d\r\n"
+        "UDFCleanup: %u calls, %I64d (100ns units), avg: %I64d\r\n"
+        "UDFDirControl: %u calls, %I64d (100ns units), avg: %I64d\r\n"
+        "UDFQueryInfo: %u calls, %I64d (100ns units), avg: %I64d\r\n"
+        "UDFSetInfo: %u calls, %I64d (100ns units), avg: %I64d\r\n"
         "---\r\n",
         IoReadTime,
         IoWriteTime, 
         WrittenData,
-        IoRelWriteTime);
+        IoRelWriteTime,
+        UDFCreateCount, UDFCreateTime, UDFCreateCount > 0 ? (UDFCreateTime / UDFCreateCount) : 0,
+        UDFReadCount, UDFReadTime, UDFReadCount > 0 ? (UDFReadTime / UDFReadCount) : 0,
+        UDFWriteCount, UDFWriteTime, UDFWriteCount > 0 ? (UDFWriteTime / UDFWriteCount) : 0,
+        UDFCloseCount, UDFCloseTime, UDFCloseCount > 0 ? (UDFCloseTime / UDFCloseCount) : 0,
+        UDFCleanupCount, UDFCleanupTime, UDFCleanupCount > 0 ? (UDFCleanupTime / UDFCleanupCount) : 0,
+        UDFDirControlCount, UDFDirControlTime, UDFDirControlCount > 0 ? (UDFDirControlTime / UDFDirControlCount) : 0,
+        UDFQueryInfoCount, UDFQueryInfoTime, UDFQueryInfoCount > 0 ? (UDFQueryInfoTime / UDFQueryInfoCount) : 0,
+        UDFSetInfoCount, UDFSetInfoTime, UDFSetInfoCount > 0 ? (UDFSetInfoTime / UDFSetInfoCount) : 0);
 
     if (BufferLength >= sizeof(Buffer)) {
         BufferLength = sizeof(Buffer) - 1;

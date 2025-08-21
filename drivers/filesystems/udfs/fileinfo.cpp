@@ -54,6 +54,10 @@ UDFQueryInfo(
 
     TmPrint(("UDFQueryInfo: \n"));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(QueryInfo);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -85,6 +89,10 @@ UDFQueryInfo(
     }
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(QueryInfo);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 } // end UDFQueryInfo()
@@ -118,6 +126,10 @@ UDFSetInfo(
 
     TmPrint(("UDFSetInfo: \n"));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(SetInfo);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -149,6 +161,10 @@ UDFSetInfo(
     }
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(SetInfo);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 } // end UDFSetInfo()

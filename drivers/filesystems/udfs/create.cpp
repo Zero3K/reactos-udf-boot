@@ -69,6 +69,10 @@ UDFCreate(
 
     TmPrint(("UDFCreate:\n"));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(Create);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -102,6 +106,10 @@ UDFCreate(
     AdPrint(("UDFCreate: %x\n", RC));
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(Create);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 

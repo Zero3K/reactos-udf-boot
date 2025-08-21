@@ -55,6 +55,10 @@ UDFCleanup(
 
     TmPrint(("UDFCleanup\n"));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(Cleanup);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -86,6 +90,10 @@ UDFCleanup(
     }
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(Cleanup);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 } // end UDFCleanup()
