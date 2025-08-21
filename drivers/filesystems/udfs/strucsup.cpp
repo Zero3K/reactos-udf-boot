@@ -252,8 +252,9 @@ Return Value:
 
    // CdUninitializeMcb( IrpContext, Fcb );
 
-    // Clean up the non-paged portion of the FCB - this was commented out but is needed
-    if (Fcb->FcbNonpaged != NULL) {
+    // Clean up the non-paged portion of the FCB only if no references remain
+    // This prevents premature cleanup during UDF detection
+    if (Fcb->FcbNonpaged != NULL && Fcb->FcbCleanup == 0 && Fcb->FcbReference == 0) {
         UDFDeleteFcbNonpaged( IrpContext, Fcb->FcbNonpaged );
         Fcb->FcbNonpaged = NULL;
         Fcb->Header.Resource = NULL;
