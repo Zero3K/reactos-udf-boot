@@ -92,7 +92,7 @@ UDFClose(
         IrpContext = UDFCreateIrpContext(Irp, DeviceObject);
         ASSERT(IrpContext);
 
-        RC = UDFCommonClose(IrpContext, Irp, FALSE);
+        RC = UDFCommonClose(IrpContext, Irp);
 
     } _SEH2_EXCEPT(UDFExceptionFilter(IrpContext, _SEH2_GetExceptionInformation())) {
 
@@ -130,16 +130,15 @@ UDFClose(
 * Return Value: must be STATUS_SUCCESS
 *
 *************************************************************************/
+_Requires_lock_held_(_Global_critical_region_)
 NTSTATUS
 UDFCommonClose(
     PIRP_CONTEXT IrpContext,
-    PIRP             Irp,
-    BOOLEAN          CanWait
+    PIRP Irp
     )
 {
     NTSTATUS                RC = STATUS_SUCCESS;
-    PIO_STACK_LOCATION      IrpSp = NULL;
-    PFILE_OBJECT            FileObject = NULL;
+    PFILE_OBJECT            FileObject = IoGetCurrentIrpStackLocation(Irp)->FileObject;
     PFCB                    Fcb = NULL;
     PCCB                    Ccb = NULL;
     PVCB                    Vcb = NULL;
@@ -147,7 +146,6 @@ UDFCommonClose(
     BOOLEAN                 AcquiredGD = FALSE;
     PUDF_FILE_INFO          fi;
     ULONG                   i = 0;
-    BOOLEAN                 PostRequest = FALSE;
     TYPE_OF_OPEN            TypeOfOpen;
     ULONG UserReference = 0;
 
@@ -155,8 +153,6 @@ UDFCommonClose(
     UNICODE_STRING          CurName;
     PDIR_INDEX_HDR          DirNdx;
 #endif
-
-    AdPrint(("UDFCommonClose: \n"));
 
     PAGED_CODE();
 
@@ -172,41 +168,25 @@ UDFCommonClose(
         return STATUS_SUCCESS;
     }
 
-    if (Irp) {
+    //  Decode the file object to get the type of open and Fcb/Ccb.
 
-        // If this is the first (IOManager) request
-        // First, get a pointer to the current I/O stack location
+    TypeOfOpen = UDFDecodeFileObject(IoGetCurrentIrpStackLocation(Irp)->FileObject,
+                                     &Fcb,
+                                     &Ccb);
 
-        IrpSp = IoGetCurrentIrpStackLocation(Irp);
+    // No work to do for unopened file objects.
 
-        FileObject = IrpSp->FileObject;
+    if (TypeOfOpen == UnopenedFileObject) {
 
-        //  Decode the file object to get the type of open and Fcb/Ccb.
+        UDFCompleteRequest(IrpContext, Irp, STATUS_SUCCESS);
 
-        TypeOfOpen = UDFDecodeFileObject(FileObject, &Fcb, &Ccb);
-
-        //  No work to do for unopened file objects.
-
-        if (TypeOfOpen == UnopenedFileObject) {
-
-            UDFCompleteRequest(IrpContext, Irp, STATUS_SUCCESS);
-
-            return STATUS_SUCCESS;
-        }
-
-        ASSERT_CCB(Ccb);
-
-    } else {
-
-        // If this is a queued call (for our dispatch)
-        // Get saved Fcb address
-        Fcb = IrpContext->Fcb;
-        i = IrpContext->TreeLength;
+        return STATUS_SUCCESS;
     }
 
     Vcb = Fcb->Vcb;
 
     ASSERT_FCB(Fcb);
+    ASSERT_CCB(Ccb);
     ASSERT_VCB(Vcb);
 
     _SEH2_TRY {
@@ -256,15 +236,6 @@ UDFCommonClose(
         }
 #endif //UDF_DELAYED_CLOSE
 
-        if (Irp) {
-            // We should post actual procesing if the caller does not want to block
-            if (!CanWait) {
-                AdPrint(("   post Close Irp\n"));
-                PostRequest = TRUE;
-                try_return(RC = STATUS_SUCCESS);
-            }
-        }
-
         // Close request is near completion, Vcb is acquired.
         // Now we can safely decrease CcbCount, because no Rename
         // operation can run until Vcb release.
@@ -277,7 +248,7 @@ UDFCommonClose(
             AdPrint(("UDF: Closing volume\n"));
             AdPrint(("UDF: ReferenceCount:  %x\n",Fcb->FcbReference));
 
-            if (Vcb->VcbReference > UDF_RESIDUAL_REFERENCE) {
+            if (Vcb->VcbCleanup > 0) {
                 ASSERT(Fcb == Fcb->Vcb->VolumeDasdFcb);
                 UDFInterlockedDecrement((PLONG)&Fcb->FcbReference);
                 ASSERT(Fcb);
@@ -294,7 +265,7 @@ UDFCommonClose(
                 BrutePoint();
             }
             // Acquire GlobalDataResource
-            UDFAcquireResourceExclusive(&UdfData.GlobalDataResource, TRUE);
+            UDFAcquireUdfData(IrpContext);
             AcquiredGD = TRUE;
 //            // Acquire Vcb
             UDFAcquireResourceExclusive(&Vcb->VcbResource, TRUE);
@@ -312,7 +283,7 @@ UDFCommonClose(
 
             if (Vcb->VcbCondition == VcbDismountInProgress ||
                Vcb->VcbCondition == VcbInvalid ||
-             ((Vcb->VcbCondition == VcbNotMounted) && (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE))) {
+             ((Vcb->VcbCondition == VcbNotMounted) && (Vcb->VcbCleanup == 0))) {
                 // Try to KILL dismounted volume....
                 // w2k requires this, NT4 - recomends
                 AcquiredVcb = UDFCheckForDismount(IrpContext, Vcb, TRUE);
@@ -352,29 +323,9 @@ try_exit: NOTHING;
             UDFReleaseResource(&(UdfData.GlobalDataResource));
         }
 
-        // Post IRP if required
-        if (PostRequest) {
-
-            // Perform the post operation & complete the IRP
-            // if this is first call of UDFCommonClose
-            // and will return STATUS_SUCCESS back to us
-            IrpContext->Irp = NULL;
-            IrpContext->Fcb = Fcb;
-            UDFPostRequest(IrpContext, NULL);
-        }
-
-        if (!_SEH2_AbnormalTermination()) {
-            // If this is not async close complete the IRP
-            if (Irp) {
-
-                UDFCompleteRequest(NULL, Irp, STATUS_SUCCESS);
-            }
-            // Free up the Irp Context
-            if (!PostRequest)
-                UDFCleanupIrpContext(IrpContext);
-        }
-
     } _SEH2_END; // end of "__finally" processing
+
+    UDFCompleteRequest(IrpContext, Irp, STATUS_SUCCESS);
 
     return STATUS_SUCCESS ;
 } // end UDFCommonClose()
@@ -608,21 +559,6 @@ UDFTeardownStructures(
     }
 
 } // end UDFCleanUpFcbChain()
-
-VOID
-UDFDoDelayedClose(
-    IN PIRP_CONTEXT_LITE NextIrpContextLite
-    )
-{
-    IRP_CONTEXT StackIrpContext;
-
-    AdPrint(("  UDFDoDelayedClose\n"));
-    UDFInitializeStackIrpContextFromLite(&StackIrpContext, NextIrpContextLite);
-    MyFreePool__(NextIrpContextLite);
-    StackIrpContext.Fcb->IrpContextLite = NULL;
-    StackIrpContext.Fcb->FcbState &= ~UDF_FCB_DELAY_CLOSE;
-    UDFCommonClose(&StackIrpContext, NULL, TRUE);
-} // end UDFDoDelayedClose()
 
 PIRP_CONTEXT
 UDFRemoveClose(
@@ -1224,185 +1160,6 @@ UDFIsLastClose(
     }
     return FALSE;
 } // UDFIsLastClose()
-
-NTSTATUS
-UDFCloseAllXXXDelayedInDir(
-    IN PVCB             Vcb,
-    IN PUDF_FILE_INFO   FileInfo,
-    IN BOOLEAN          System
-    )
-{
-    PUDF_FILE_INFO*         PassedList = NULL;
-    ULONG                   PassedListSize = 0;
-    PUDF_FILE_INFO*         FoundList = NULL;
-    ULONG                   FoundListSize = 0;
-    NTSTATUS                RC;
-    ULONG                   i;
-    _SEH2_VOLATILE BOOLEAN  ResAcq = FALSE;
-    _SEH2_VOLATILE BOOLEAN  AcquiredVcb = FALSE;
-    PUDF_FILE_INFO          CurFileInfo;
-    PFE_LIST_ENTRY          CurListPtr;
-    PFE_LIST_ENTRY*         ListPtrArray = NULL;
-
-    _SEH2_TRY {
-
-        UDFPrint(("    UDFCloseAllXXXDelayedInDir(): Acquire DelayedCloseResource\n"));
-        // Acquire DelayedCloseResource
-        UDFAcquireResourceExclusive(&(UdfData.GlobalDataResource), TRUE);
-        ResAcq = TRUE;
-
-        UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE);
-        AcquiredVcb = TRUE;
-
-        RC = UDFBuildTreeItemsList(Vcb, FileInfo,
-                System ? UDFIsLastClose : UDFIsInDelayedCloseQueue,
-                &PassedList, &PassedListSize, &FoundList, &FoundListSize);
-
-        if (!NT_SUCCESS(RC)) {
-            UDFPrint(("    UDFBuildTreeItemsList(): error %x\n", RC));
-            try_return(RC);
-        }
-
-        if (!FoundList || !FoundListSize) {
-            try_return(RC = STATUS_SUCCESS);
-        }
-
-        // build array of referenced pointers
-        ListPtrArray = (PFE_LIST_ENTRY*)(MyAllocatePool__(NonPagedPool, FoundListSize*sizeof(PFE_LIST_ENTRY)));
-        if (!ListPtrArray) {
-            UDFPrint(("    Can't alloc ListPtrArray for %x items\n", FoundListSize));
-            try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
-        }
-
-        for(i=0;i<FoundListSize;i++) {
-
-            _SEH2_TRY {
-
-                CurFileInfo = FoundList[i];
-                if (!CurFileInfo->ListPtr) {
-                    CurFileInfo->ListPtr = (PFE_LIST_ENTRY)(MyAllocatePool__(NonPagedPool, sizeof(FE_LIST_ENTRY)));
-                    if (!CurFileInfo->ListPtr) {
-                        UDFPrint(("    Can't alloc ListPtrEntry for items %x\n", i));
-                        try_return(RC = STATUS_INSUFFICIENT_RESOURCES);
-                    }
-                    CurFileInfo->ListPtr->FileInfo = CurFileInfo;
-                    CurFileInfo->ListPtr->EntryRefCount = 0;
-                }
-                CurFileInfo->ListPtr->EntryRefCount++;
-                ListPtrArray[i] = CurFileInfo->ListPtr;
-
-            } _SEH2_EXCEPT (EXCEPTION_EXECUTE_HANDLER) {
-                BrutePoint();
-            } _SEH2_END;
-        }
-
-        UDFReleaseResource(&(Vcb->VcbResource));
-        AcquiredVcb = FALSE;
-
-        if (System) {
-            // Remove from system queue
-            PFCB Fcb;
-            IO_STATUS_BLOCK IoStatus;
-            BOOLEAN NoDelayed = (Vcb->VcbState & UDF_VCB_FLAGS_NO_DELAYED_CLOSE) ?
-                                     TRUE : FALSE;
-
-            Vcb->VcbState |= UDF_VCB_FLAGS_NO_DELAYED_CLOSE;
-            for(i=FoundListSize;i>0;i--) {
-                UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE);
-                AcquiredVcb = TRUE;
-                _SEH2_TRY {
-
-                    CurListPtr = ListPtrArray[i-1];
-                    CurFileInfo = CurListPtr->FileInfo;
-                    if (CurFileInfo &&
-                       (Fcb = CurFileInfo->Fcb)) {
-                        ASSERT((ULONG_PTR)Fcb > 0x1000);
-//                            ASSERT((ULONG)(Fcb->SectionObject) > 0x1000);
-                        if (!(Fcb->NtReqFCBFlags & UDF_NTREQ_FCB_DELETED) &&
-                            (Fcb->NtReqFCBFlags & UDF_NTREQ_FCB_MODIFIED)) {
-                            MmPrint(("    CcFlushCache()\n"));
-                            CcFlushCache(&Fcb->FcbNonpaged->SegmentObject, NULL, 0, &IoStatus);
-                        }
-                        if (Fcb->FcbNonpaged->SegmentObject.ImageSectionObject) {
-                            MmPrint(("    MmFlushImageSection()\n"));
-                            MmFlushImageSection(&Fcb->FcbNonpaged->SegmentObject, MmFlushForWrite);
-                        }
-                        if (Fcb->FcbNonpaged->SegmentObject.DataSectionObject) {
-                            MmPrint(("    CcPurgeCacheSection()\n"));
-                            CcPurgeCacheSection(&Fcb->FcbNonpaged->SegmentObject, NULL, 0, FALSE);
-                        }
-                    } else {
-                        MmPrint(("    Skip item: deleted\n"));
-                    }
-                    CurListPtr->EntryRefCount--;
-                    if (!CurListPtr->EntryRefCount) {
-                        if (CurListPtr->FileInfo)
-                            CurListPtr->FileInfo->ListPtr = NULL;
-                        MyFreePool__(CurListPtr);
-                    }
-                } _SEH2_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
-                    BrutePoint();
-                } _SEH2_END;
-                UDFReleaseResource(&(Vcb->VcbResource));
-                AcquiredVcb = FALSE;
-            }
-            if (!NoDelayed)
-                Vcb->VcbState &= ~UDF_VCB_FLAGS_NO_DELAYED_CLOSE;
-        } else {
-            // Remove from internal queue
-            PIRP_CONTEXT_LITE NextIrpContextLite;
-
-            for(i=FoundListSize;i>0;i--) {
-
-                UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE);
-                AcquiredVcb = TRUE;
-
-                CurListPtr = ListPtrArray[i-1];
-                CurFileInfo = CurListPtr->FileInfo;
-
-                if (CurFileInfo &&
-                   CurFileInfo->Fcb &&
-                    (NextIrpContextLite = CurFileInfo->Fcb->IrpContextLite)) {
-
-                    RemoveEntryList( &(NextIrpContextLite->DelayedCloseLinks) );
-
-                    UdfData.DelayedCloseCount--;
-
-                    UDFDoDelayedClose(NextIrpContextLite);
-                }
-
-                CurListPtr->EntryRefCount--;
-                if (!CurListPtr->EntryRefCount) {
-                    if (CurListPtr->FileInfo)
-                        CurListPtr->FileInfo->ListPtr = NULL;
-                    MyFreePool__(CurListPtr);
-                }
-                UDFReleaseResource(&(Vcb->VcbResource));
-                AcquiredVcb = FALSE;
-            }
-        }
-        RC = STATUS_SUCCESS;
-
-try_exit: NOTHING;
-
-    } _SEH2_FINALLY {
-        // release Vcb
-        if (AcquiredVcb)
-            UDFReleaseResource(&(Vcb->VcbResource));
-        // Release DelayedCloseResource
-        if (ResAcq)
-            UDFReleaseResource(&(UdfData.GlobalDataResource));
-
-        if (ListPtrArray)
-            MyFreePool__(ListPtrArray);
-        if (PassedList)
-            MyFreePool__(PassedList);
-        if (FoundList)
-            MyFreePool__(FoundList);
-    } _SEH2_END;
-
-    return RC;
-} // end UDFCloseAllXXXDelayedInDir(
 
 
 /*

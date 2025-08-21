@@ -28,6 +28,13 @@
 #define OBSOLETE_IOCTL_CDROM_GET_CONTROL  CTL_CODE(IOCTL_CDROM_BASE, 0x000D, METHOD_BUFFERED, FILE_READ_ACCESS)
 #endif // OBSOLETE_IOCTL_CDROM_GET_CONTROL
 
+NTSTATUS
+NTAPI
+UDFDevCtrlCompletionRoutine (
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PIRP Irp,
+    IN PVOID Contxt
+    );
 
 /*************************************************************************
 *
@@ -196,60 +203,65 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
 
     CanWait = FlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT);
 
-    if (!FlagOn(Fcb->FcbState, UDF_FCB_DIRECTORY))
-    {
+    if (TypeOfOpen == UserFileOpen) {
+
         UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
         UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, CanWait);
         FcbAcquired = TRUE;
 
-        UDFVerifyFcbOperation(IrpContext, Fcb, Ccb);
+        _SEH2_TRY {
 
-        if (IsOpticalWriteRModeActive)
-        {
-            UDFAcquireDeviceShared(IrpContext, Vcb, NULL);
-            DeviceAcquired = TRUE;
-        }
+            UDFVerifyFcbOperation(IrpContext, Fcb, Ccb);
 
-        switch (IrpSp->Parameters.DeviceIoControl.IoControlCode) {
-        case IOCTL_STORAGE_SET_READ_AHEAD:
-            Status = STATUS_SUCCESS;
+            if (IsOpticalWriteRModeActive)
+            {
+                UDFAcquireDeviceShared(IrpContext, Vcb, NULL);
+                DeviceAcquired = TRUE;
+            }
 
-            UDFCompleteRequest(IrpContext, Irp, Status);
-            break;
+            switch (IrpSp->Parameters.DeviceIoControl.IoControlCode) {
+            case IOCTL_STORAGE_SET_READ_AHEAD:
 
-        case IOCTL_DVD_READ_KEY:
-        case IOCTL_DVD_SEND_KEY:
+                Status = STATUS_SUCCESS;
 
-            Status = UDFDvdTransferKey(IrpContext, Irp, Fcb);
-            break;
+                UDFCompleteRequest(IrpContext, Irp, Status);
+                break;
+
+            case IOCTL_DVD_READ_KEY:
+            case IOCTL_DVD_SEND_KEY:
+
+                Status = UDFDvdTransferKey(IrpContext, Irp, Fcb);
+                break;
             
-        case IOCTL_DVD_READ_STRUCTURE:
+            case IOCTL_DVD_READ_STRUCTURE:
 
-            Status = UDFDvdReadStructure(IrpContext, Irp, Fcb);
-            break;
+                Status = UDFDvdReadStructure(IrpContext, Irp, Fcb);
+                break;
 
-        default:
-            Status = STATUS_INVALID_PARAMETER;
-            UDFCompleteRequest(IrpContext, Irp, Status);
-            break;
+            default:
+
+                Status = STATUS_INVALID_PARAMETER;
+                UDFCompleteRequest(IrpContext, Irp, Status);
+                break;
+            }
+
+        } _SEH2_FINALLY {
+
+            if (DeviceAcquired)
+                UDFReleaseDevice(IrpContext, Vcb, NULL);
+
+            if (FcbAcquired) {
+                UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
+            }
         }
 
-        if (DeviceAcquired)
-            UDFReleaseDevice(IrpContext, Vcb, NULL);
-
-        if (FcbAcquired) {
-            UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
-            UDFReleaseResource(&Fcb->FcbNonpaged->FcbResource);
-        }
-
-        UDFPrint(("UDFCommonDevControl -> %08lx\n", Status));
         return Status;
     }
 
-    if (Fcb->NodeIdentifier.NodeTypeCode != UDF_NODE_TYPE_VCB) {
+    if (TypeOfOpen != UserVolumeOpen) {
 
         UDFCompleteRequest(IrpContext, Irp, STATUS_INVALID_PARAMETER);
-        UDFPrint(("UDFCommonDevControl -> %08lx\n", STATUS_INVALID_PARAMETER));
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -271,7 +283,6 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
         if (IrpSp->Parameters.DeviceIoControl.OutputBufferLength < sizeof(CDROM_DISK_DATA)) {
 
             UDFCompleteRequest(IrpContext, Irp, STATUS_BUFFER_TOO_SMALL);
-            UDFPrint(("UDFCommonDevControl -> %08lx\n", STATUS_BUFFER_TOO_SMALL));
             return STATUS_BUFFER_TOO_SMALL;
         }
 
@@ -279,14 +290,13 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
 
         Irp->IoStatus.Information = sizeof(CDROM_DISK_DATA);
         UDFCompleteRequest(IrpContext, Irp, STATUS_SUCCESS);
-        UDFPrint(("UDFCommonDevControl -> %08lx\n", STATUS_SUCCESS));
         return STATUS_SUCCESS;
 
     case IOCTL_CDROM_EJECT_MEDIA:
     case IOCTL_STORAGE_EJECT_MEDIA:
     case IOCTL_DISK_EJECT_MEDIA:
 
-        if (FlagOn(Vcb->VcbState, VCB_STATE_PNP_NOTIFICATION)) {
+        if (!FlagOn(Vcb->VcbState, VCB_STATE_PNP_NOTIFICATION)) {
 
             UDFAcquireResourceExclusive(&Vcb->VcbResource, CanWait);
 
@@ -399,20 +409,48 @@ UDFCommonDeviceControl(PIRP_CONTEXT IrpContext, PIRP Irp)
         break;
     }
 
+    IoCopyCurrentIrpStackLocationToNext(Irp);
+
+    IoSetCompletionRoutine(Irp,
+                           UDFDevCtrlCompletionRoutine,
+                           NULL,
+                           TRUE,
+                           TRUE,
+                           TRUE);
+
     if (IsOpticalWriteRModeActive) {
 
         UDFAcquireDeviceShared(IrpContext, Vcb, NULL);
         DeviceAcquired = TRUE;
     }
 
-    IoSkipCurrentIrpStackLocation(Irp);
-
-    Status = IofCallDriver(Vcb->TargetDeviceObject, Irp);
+    Status = IoCallDriver(Vcb->TargetDeviceObject, Irp);
 
     if (DeviceAcquired)
         UDFReleaseDevice(IrpContext, Vcb, NULL);
 
     UDFCompleteRequest(IrpContext, NULL, STATUS_SUCCESS);
-    UDFPrint(("UDFCommonDevControl -> %08lx\n", Status));
     return Status;
+}
+
+NTSTATUS
+NTAPI
+UDFDevCtrlCompletionRoutine (
+    IN PDEVICE_OBJECT DeviceObject,
+    IN PIRP Irp,
+    IN PVOID Contxt
+    )
+
+{
+    //  Add the hack-o-ramma to fix formats.
+
+    if (Irp->PendingReturned) {
+
+        IoMarkIrpPending(Irp);
+    }
+
+    return STATUS_SUCCESS;
+
+    UNREFERENCED_PARAMETER(DeviceObject);
+    UNREFERENCED_PARAMETER(Contxt);
 }

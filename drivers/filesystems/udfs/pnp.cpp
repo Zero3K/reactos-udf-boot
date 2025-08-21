@@ -172,7 +172,7 @@ UDFCommonPnp (
     // example by a force dismount. Check for this condition. We must hold this
     // lock until the pnp worker functions take additional locks/refs on the Vcb.
 
-    UDFAcquireResourceExclusive(&UdfData.GlobalDataResource, TRUE);
+    UDFAcquireUdfData(IrpContext);
 
     // Make sure this device object really is big enough to be a volume device
     // object.  If it isn't, we need to get out before we try to reference some
@@ -188,8 +188,8 @@ UDFCommonPnp (
         // We were called with something we don't understand.
 
         Status = STATUS_INVALID_PARAMETER;
-        UDFReleaseResource(&UdfData.GlobalDataResource);
-        UDFCompleteRequest( IrpContext, Irp, Status );
+        UDFReleaseUdfData(IrpContext);
+        UDFCompleteRequest(IrpContext, Irp, Status);
         return Status;
     }
 
@@ -245,16 +245,16 @@ UDFCommonPnp (
 
     if (PassThrough) {
 
-        UDFReleaseResource(&UdfData.GlobalDataResource);
+        UDFReleaseUdfData(IrpContext);
 
-        //  Just pass the IRP on.  As we do not need to be in the
-        //  way on return, ellide ourselves out of the stack.
+        // Just pass the IRP on.  As we do not need to be in the
+        // way on return, ellide ourselves out of the stack.
 
         IoSkipCurrentIrpStackLocation(Irp);
 
         Status = IoCallDriver(Vcb->TargetDeviceObject, Irp);
         
-        //  Cleanup our Irp Context.  The driver has completed the Irp.
+        // Cleanup our Irp Context.  The driver has completed the Irp.
     
         UDFCompleteRequest( IrpContext, NULL, STATUS_SUCCESS );
     }
@@ -320,7 +320,7 @@ Return Value:
     Vcb->VcbReference += 1;
     UDFUnlockVcb(IrpContext, Vcb);
     
-    UDFReleaseResource(&UdfData.GlobalDataResource);
+    UDFReleaseUdfData(IrpContext);
 
     Status = UDFLockVolumeInternal(IrpContext, Vcb, NULL);
 
@@ -328,7 +328,7 @@ Return Value:
     
     UDFReleaseResource(&Vcb->VcbResource);
     
-    UDFAcquireResourceExclusive(&UdfData.GlobalDataResource, CanWait);
+    UDFAcquireUdfData(IrpContext);
     UDFAcquireResourceExclusive(&Vcb->VcbResource, CanWait);
 
     //  Remove our extra reference.
@@ -427,11 +427,11 @@ Return Value:
         _Analysis_assume_lock_not_held_(Vcb->VcbResource);
     }
 
-    UDFReleaseResource(&UdfData.GlobalDataResource);
+    UDFReleaseUdfData(IrpContext);
     
-    //  Cleanup our IrpContext and complete the IRP if neccesary.
+    // Cleanup our IrpContext and complete the IRP if neccesary.
 
-    UDFCompleteRequest( IrpContext, Irp, Status );
+    UDFCompleteRequest(IrpContext, Irp, Status);
 
     return Status;
 }
@@ -567,9 +567,9 @@ Return Value:
         _Analysis_assume_lock_not_held_(Vcb->VcbResource);
     }
 
-    UDFReleaseResource(&UdfData.GlobalDataResource);
+    UDFReleaseUdfData(IrpContext);
     
-    //  Cleanup our IrpContext and complete the IRP.
+    // Cleanup our IrpContext and complete the IRP.
 
     UDFCompleteRequest(IrpContext, Irp, Status);
 
@@ -693,9 +693,9 @@ Return Value:
         _Analysis_assume_lock_not_held_(Vcb->VcbResource);
     }
 
-    UDFReleaseResource(&UdfData.GlobalDataResource);
+    UDFReleaseUdfData(IrpContext);
     
-    //  Cleanup our IrpContext and complete the IRP.
+    // Cleanup our IrpContext and complete the IRP.
 
     UDFCompleteRequest(IrpContext, Irp, Status);
 
@@ -756,7 +756,7 @@ Return Value:
     BOOLEAN CanWait = FlagOn(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT);
 
     UDFAcquireResourceExclusive(&Vcb->VcbResource, CanWait);
-    UDFReleaseResource(&UdfData.GlobalDataResource);
+    UDFReleaseUdfData(IrpContext);
 
     // Unlock the volume.  This is benign if we never had seen
     // a QUERY.

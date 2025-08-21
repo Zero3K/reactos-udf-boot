@@ -384,6 +384,8 @@ struct VCB {
     ULONG                               VcbCleanup;
     ULONG                               VcbReference;
     ULONG                               VcbUserReference;
+    ULONG                               VcbResidualReference;
+    ULONG                               VcbResidualUserReference;
     ERESOURCE                           FlushResource;
     // each VCB is accessible off a global linked list
     LIST_ENTRY                          NextVCB;
@@ -701,7 +703,8 @@ struct VCB {
 using PVCB = VCB*;
 
 // One for root
-#define         UDF_RESIDUAL_REFERENCE              (2)
+#define UDFS_BASE_RESIDUAL_REFERENCE                (4)//(6)
+#define UDFS_BASE_RESIDUAL_USER_REFERENCE           (1)//(3)
 
 // input flush flags
 #define         UDF_FLUSH_FLAGS_BREAKABLE           (0x00000001)

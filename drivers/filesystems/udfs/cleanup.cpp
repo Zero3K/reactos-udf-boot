@@ -185,9 +185,7 @@ UDFCommonCleanup(
         // and other similar stuff.
         //  BrutePoint();
 
-        if (Fcb == Fcb->Vcb->VolumeDasdFcb) {
-            AdPrint(("Cleaning up Volume\n"));
-            AdPrint(("UDF: FcbCleanup: %x\n", Fcb->FcbCleanup));
+        if (TypeOfOpen == UserVolumeOpen) {
 
             // For a force dismount, physically disconnect this Vcb from the device so 
             // a new mount can occur.  Vcb deletion cannot happen at this time since 
@@ -196,11 +194,9 @@ UDFCommonCleanup(
 
             if (FlagOn(Ccb->Flags, UDF_CCB_FLAG_DISMOUNT_ON_CLOSE)) {
         
-                UDFAcquireResourceExclusive(&UdfData.GlobalDataResource, TRUE);
-        
+                UDFAcquireUdfData(IrpContext);
                 UDFCheckForDismount(IrpContext, Vcb, TRUE);
-
-                UDFReleaseResource(&(UdfData.GlobalDataResource));
+                UDFReleaseUdfData(IrpContext);
 
             // If this handle actually wrote something, flush the device buffers,
             // and then set the verify bit now just to be safe (in case there is no
@@ -223,8 +219,10 @@ UDFCommonCleanup(
                 SendUnlockNotification = TRUE;
             }
 
-            UDFInterlockedDecrement((PLONG)&(Fcb->FcbCleanup));
-            UDFInterlockedDecrement((PLONG)&(Vcb->VcbCleanup));
+            UDFLockVcb(IrpContext, Vcb);
+            UDFDecrementCleanupCounts(IrpContext, Fcb);
+            UDFUnlockVcb(IrpContext, Vcb);
+
             if (FileObject->Flags & FO_CACHE_SUPPORTED) {
                 // we've cached close
                 UDFInterlockedDecrement((PLONG)&(Fcb->CachedOpenHandleCount));
@@ -267,9 +265,13 @@ UDFCommonCleanup(
         UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
         UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
         AcquiredFCB = TRUE;
-        // dereference object
-        UDFInterlockedDecrement((PLONG)&Fcb->FcbCleanup);
-        UDFInterlockedDecrement((PLONG)&Vcb->VcbCleanup);
+
+        // Decrement the cleanup counts in the Vcb and Fcb.
+
+        UDFLockVcb(IrpContext, Vcb);
+        UDFDecrementCleanupCounts(IrpContext, Fcb);
+        UDFUnlockVcb(IrpContext, Vcb);
+
         if (FileObject->Flags & FO_CACHE_SUPPORTED) {
             // we've cached close
             UDFInterlockedDecrement((PLONG)&Fcb->CachedOpenHandleCount);
@@ -336,12 +338,9 @@ UDFCommonCleanup(
 
             // Make system to issue last Close request
             // for our Target ...
-            UDFRemoveFromSystemDelayedQueue(Fcb);
 
 #ifdef UDF_DELAYED_CLOSE
-            // remove file from our DelayedClose queue
-            UDFRemoveFromDelayedQueue(Fcb);
-            ASSERT(!Fcb->IrpContextLite);
+            UDFFspClose(Fcb->Vcb);
 #endif //UDF_DELAYED_CLOSE
 
             UDFAcquireResourceShared(&Vcb->VcbResource, TRUE);

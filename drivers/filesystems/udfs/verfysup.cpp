@@ -78,7 +78,7 @@ Arguments:
     Vcb - This is the volume to verify.
 */
 
-NTSTATUS
+VOID
 UDFVerifyVcb(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb
@@ -90,20 +90,19 @@ UDFVerifyVcb(
     BOOLEAN ForceVerify = FALSE;
     BOOLEAN DevMarkedForVerify;
 
-    UDFPrint(("UDFVerifyVCB: Modified=%d\n", Vcb->Modified));
+    // Fail immediately if the volume is in the progress of being dismounted
+    // or has been marked invalid.
 
-    //  Fail immediately if the volume is in the progress of being dismounted
-    //  or has been marked invalid.
     if ((Vcb->VcbCondition == VcbInvalid) ||
        ((Vcb->VcbCondition == VcbDismountInProgress) && 
        (IrpContext->MajorFunction != IRP_MJ_CREATE))) {
 
         if (FlagOn(Vcb->VcbState, VCB_STATE_DISMOUNT_IN_PROGRESS)) {
 
-            return STATUS_VOLUME_DISMOUNTED;
+            UDFRaiseStatus(IrpContext, STATUS_VOLUME_DISMOUNTED);
         }
 
-        return STATUS_FILE_INVALID;
+        UDFRaiseStatus(IrpContext, STATUS_FILE_INVALID);
     }
 
     //  Capture the real device verify state.
@@ -133,15 +132,13 @@ UDFVerifyVcb(
                 MediaChangeCount = 0;
             }
 
+            // There are four cases when we want to do a verify.  These are the
+            // first three.
             //
-            //  There are four cases when we want to do a verify.  These are the
-            //  first three.
-            //
-            //  1. We are mounted,  and the device has become empty
-            //  2. The device has returned verify required (=> DO_VERIFY_VOL flag is
-            //     set, but could be due to hardware condition)
-            //  3. Media change count doesn't match the one in the Vcb
-            //
+            // 1. We are mounted,  and the device has become empty
+            // 2. The device has returned verify required (=> DO_VERIFY_VOL flag is
+            //    set, but could be due to hardware condition)
+            // 3. Media change count doesn't match the one in the Vcb
             
             if (((Vcb->VcbCondition == VcbMounted) &&
                  UDFIsRawDevice(Status)) 
@@ -162,22 +159,22 @@ UDFVerifyVcb(
 
                 ForceVerify = TRUE;
 
-                //  NOTE that we no longer update the media change count here. We
-                //  do so only when we've actually completed a verify at a particular
-                //  change count value.
+                // NOTE that we no longer update the media change count here. We
+                // do so only when we've actually completed a verify at a particular
+                // change count value.
             }
         }
 
-        //  This is the 4th verify case.
+        // This is the 4th verify case.
 
-        //  We ALWAYS force CREATE requests on unmounted volumes through the 
-        //  verify path.  These requests could have been in limbo between
-        //  IoCheckMountedVpb and us when a verify/mount took place and caused
-        //  a completely different fs/volume to be mounted.  In this case the
-        //  checks above may not have caught the condition,  since we may already
-        //  have verified (wrong volume) and decided that we have nothing to do.
-        //  We want the requests to be re routed to the currently mounted volume,
-        //  since they were directed at the 'drive',  not our volume.
+        // We ALWAYS force CREATE requests on unmounted volumes through the 
+        // verify path.  These requests could have been in limbo between
+        // IoCheckMountedVpb and us when a verify/mount took place and caused
+        // a completely different fs/volume to be mounted.  In this case the
+        // checks above may not have caught the condition,  since we may already
+        // have verified (wrong volume) and decided that we have nothing to do.
+        // We want the requests to be re routed to the currently mounted volume,
+        // since they were directed at the 'drive',  not our volume.
 
         if (NT_SUCCESS(Status) && !ForceVerify && !DevMarkedForVerify &&
             (IrpContext->MajorFunction == IRP_MJ_CREATE))  {
@@ -189,24 +186,24 @@ UDFVerifyVcb(
                            (Vcb->VcbCondition == VcbNotMounted));
 
             //
-            //  Note that we don't touch the device verify flag here.  It required
-            //  it would have been caught and set by the first set of checks.
+            // Note that we don't touch the device verify flag here.  It required
+            // it would have been caught and set by the first set of checks.
             //
         }
     }
 
-    //  Raise the verify / error if neccessary.
+    // Raise the verify / error if neccessary.
     
     if (ForceVerify || DevMarkedForVerify || !NT_SUCCESS( Status)) {
     
         IoSetHardErrorOrVerifyDevice( IrpContext->Irp,
                                       Vcb->Vpb->RealDevice );
        
-        return ((ForceVerify || DevMarkedForVerify) ? STATUS_VERIFY_REQUIRED : Status);
+        UDFRaiseStatus(IrpContext, ForceVerify ? STATUS_VERIFY_REQUIRED : Status);
     }
 
-    //  Based on the condition of the Vcb we'll either return to our
-    //  caller or raise an error condition
+    // Based on the condition of the Vcb we'll either return to our
+    // caller or raise an error condition
 
     switch (Vcb->VcbCondition) {
 
@@ -214,7 +211,7 @@ UDFVerifyVcb(
 
         IoSetHardErrorOrVerifyDevice(IrpContext->Irp, Vcb->Vpb->RealDevice);
 
-        Status = STATUS_WRONG_VOLUME;
+        UDFRaiseStatus(IrpContext, STATUS_WRONG_VOLUME);
         break;
 
     case VcbInvalid:
@@ -222,18 +219,14 @@ UDFVerifyVcb(
 
         if (FlagOn(Vcb->VcbState, VCB_STATE_DISMOUNT_IN_PROGRESS)) {
 
-            Status = STATUS_VOLUME_DISMOUNTED;
+            UDFRaiseStatus(IrpContext, STATUS_VOLUME_DISMOUNTED);
 
         } else {
 
-            Status = STATUS_FILE_INVALID;
+            UDFRaiseStatus(IrpContext, STATUS_FILE_INVALID);
         }
         break;
     }
-
-    UDFPrint(("UDFVerifyVcb: RC = %x\n", Status));
-
-    return Status;
 } // end UDFVerifyVcb()
 
 /*
@@ -271,10 +264,11 @@ UDFVerifyVolume(
     //    IrpContext->RealDevice = Vpb->RealDevice;
     UDFPrint(("UDFVerifyVolume:\n"));
 
-    //  Acquire shared global access, the termination handler for the
-    //  following try statement will free the access.
+    // Acquire the global resource to synchronise against mounts and teardown,
+    // finally clause releases.
 
-    UDFAcquireResourceShared(&(UdfData.GlobalDataResource),TRUE);
+    UDFAcquireUdfData(IrpContext);
+
     UDFAcquireResourceExclusive(&(Vcb->VcbResource),TRUE);
 
     _SEH2_TRY {
@@ -512,7 +506,7 @@ try_exit: NOTHING;
             MyFreePool__(NewVcb);
         }
         UDFReleaseResource(&(Vcb->VcbResource));
-        UDFReleaseResource(&(UdfData.GlobalDataResource));
+        UDFReleaseUdfData(IrpContext);
     } _SEH2_END;
 
     // Complete the request if no exception.
@@ -613,12 +607,12 @@ UDFPerformVerify(
             //  If the device might need to go away then call our dismount routine.
             if (Vcb->VcbCondition == VcbDismountInProgress ||
                 Vcb->VcbCondition == VcbInvalid ||
-              ((Vcb->VcbCondition == VcbNotMounted) && (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE))) {
+              ((Vcb->VcbCondition == VcbNotMounted) && (Vcb->VcbReference <= Vcb->VcbResidualReference))) {
 
                 UDFPrint(("UDFPerformVerify: UDFCheckForDismount\n"));
-                UDFAcquireResourceExclusive(&(UdfData.GlobalDataResource), TRUE);
-                UDFCheckForDismount( IrpContext, Vcb, FALSE );
-                UDFReleaseResource(&(UdfData.GlobalDataResource));
+                UDFAcquireUdfData(IrpContext);
+                UDFCheckForDismount(IrpContext, Vcb, FALSE);
+                UDFReleaseUdfData(IrpContext);
             }
 
             //  If this is a create and the verify succeeded then complete the
@@ -697,61 +691,60 @@ BOOLEAN
 UDFCheckForDismount(
     IN PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
-    IN BOOLEAN _VcbAcquired
+    IN BOOLEAN Force
     )
 {
+    BOOLEAN UnlockVcb = TRUE;
     BOOLEAN VcbPresent = TRUE;
     KIRQL SavedIrql;
-    BOOLEAN VcbAcquired;
-    ULONG ResidualReferenceCount;
 
-    UDFPrint(("UDFCheckForDismount:\n"));
-    if (!Vcb) return FALSE;
+    ASSERT_IRP_CONTEXT(IrpContext);
+    ASSERT_VCB(Vcb);
 
-    //  GlobalDataResource is already acquired
-    if (!_VcbAcquired) {
-        VcbAcquired = UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE/*FALSE*/ );
-        if (!VcbAcquired)
-            return TRUE;
-    } else {
-        VcbAcquired = TRUE;
-    }
+    ASSERT_EXCLUSIVE_CDDATA;
 
-    if ((IrpContext->MajorFunction == IRP_MJ_CREATE) &&
-        (IrpContext->RealDevice == Vcb->TargetDeviceObject)) {
+    // Acquire and lock this Vcb to check the dismount state.
 
-        ResidualReferenceCount = 2;
+    ASSERT(ExIsResourceAcquiredSharedLite(&Vcb->VcbResource) == FALSE);
+    UDFAcquireVcbExclusive(IrpContext, Vcb, FALSE);
 
-    } else {
+    // Lets get rid of any pending closes for this volume.
 
-        ResidualReferenceCount = 1;
-    }
+    UDFFspClose(Vcb);
 
-    //  If the dismount is not already underway then check if the
-    //  user reference count has gone to zero.  If so start the teardown
-    //  on the Vcb.
+    UDFLockVcb(IrpContext, Vcb);
+
+    // If the dismount is not already underway then check if the
+    // user reference count has gone to zero or we are being forced
+    // to disconnect.  If so start the teardown on the Vcb.
+
     if (Vcb->VcbCondition != VcbDismountInProgress) {
-        if (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE) {
-            VcbPresent = UDFDismountVcb(IrpContext, Vcb, VcbAcquired);
+
+        if (Vcb->VcbUserReference <= Vcb->VcbResidualUserReference || Force) {
+
+            UDFUnlockVcb(IrpContext, Vcb);
+            UnlockVcb = FALSE;
+            VcbPresent = UDFDismountVcb(IrpContext, Vcb, Force == FALSE);
         }
-        VcbAcquired = VcbAcquired && VcbPresent;
 
     //  If the teardown is underway and there are absolutely no references
     //  remaining then delete the Vcb.  References here include the
     //  references in the Vcb and Vpb.
-    } else if (!(Vcb->VcbReference)) {
+
+    } else if (Vcb->VcbReference == 0) {
 
         IoAcquireVpbSpinLock( &SavedIrql );
+
         //  If there are no file objects and no reference counts in the
         //  Vpb we can delete the Vcb.  Don't forget that we have the
         //  last reference in the Vpb.
-        if (Vcb->Vpb->ReferenceCount <= ResidualReferenceCount) {
 
-            IoReleaseVpbSpinLock( SavedIrql );
-            if (VcbAcquired)
-                UDFReleaseResource(&(Vcb->VcbResource));
+        if (Vcb->Vpb->ReferenceCount == 1) {
+
+            IoReleaseVpbSpinLock(SavedIrql);
+            UDFUnlockVcb(IrpContext, Vcb);
+            UnlockVcb = FALSE;
             UDFDeleteVCB(IrpContext, Vcb);
-            VcbAcquired =
             VcbPresent = FALSE;
 
         } else {
@@ -760,9 +753,18 @@ UDFCheckForDismount(
         }
     }
 
-    //  Release any resources still acquired.
-    if (!_VcbAcquired && VcbAcquired) {
-         UDFReleaseResource(&(Vcb->VcbResource));
+    // Unlock the Vcb if still held.
+
+    if (UnlockVcb) {
+
+        UDFUnlockVcb(IrpContext, Vcb);
+    }
+
+    // Release any resources still acquired.
+
+    if (VcbPresent) {
+
+        UDFReleaseVcb(IrpContext, Vcb);
     }
 
     return VcbPresent;
@@ -794,7 +796,7 @@ BOOLEAN
 UDFDismountVcb(
     PIRP_CONTEXT IrpContext,
     IN PVCB Vcb,
-    IN BOOLEAN VcbAcquired
+    IN BOOLEAN FlushBeforeDismount
     )
 {
     PVPB OldVpb;
@@ -803,7 +805,11 @@ UDFDismountVcb(
 
     BOOLEAN FinalReference;
 
-    UDFPrint(("UDFDismountVcb:\n"));
+    ASSERT_EXCLUSIVE_CDDATA;
+    ASSERT_EXCLUSIVE_VCB(Vcb);
+
+    //TODO:
+    //UDFLockVcb(IrpContext, Vcb);
 
     //  We should only take this path once.
     ASSERT(Vcb->VcbCondition != VcbDismountInProgress);
@@ -871,8 +877,6 @@ UDFDismountVcb(
             Vcb->Vpb = NULL;
 
             IoReleaseVpbSpinLock(SavedIrql);
-            if (VcbAcquired)
-                UDFReleaseResource(&(Vcb->VcbResource));
             UDFDeleteVCB(IrpContext, Vcb);
             VcbPresent = FALSE;
         }
@@ -885,8 +889,6 @@ UDFDismountVcb(
         OldVpb->ReferenceCount--;
 
         IoReleaseVpbSpinLock(SavedIrql);
-        if (VcbAcquired)
-            UDFReleaseResource(&(Vcb->VcbResource));
         UDFDeleteVCB(IrpContext, Vcb);
         VcbPresent = FALSE;
 

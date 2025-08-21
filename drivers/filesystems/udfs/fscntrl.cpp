@@ -290,8 +290,7 @@ UDFMountVolume(
 {
     NTSTATUS                RC;
     PIO_STACK_LOCATION      IrpSp = IoGetCurrentIrpStackLocation(Irp);
-    PDEVICE_OBJECT          TargetDeviceObject = NULL;
-    PDEVICE_OBJECT          fsDeviceObject;
+    PDEVICE_OBJECT          DeviceObjectWeTalkTo = IrpSp->Parameters.MountVolume.DeviceObject;
     PVPB                    Vpb = IrpSp->Parameters.MountVolume.Vpb;
     PVCB                    Vcb = NULL;
     PDEVICE_OBJECT          VolDo = NULL;
@@ -309,17 +308,11 @@ UDFMountVolume(
     ASSERT(IrpSp);
     UDFPrint(("\n !!! UDFMountVolume\n"));
 
-    fsDeviceObject = IrpContext->RealDevice;
-    UDFPrint(("Mount on device object %x\n", fsDeviceObject));
-
-    // Get a pointer to the target physical/virtual device object.
-    TargetDeviceObject = IrpSp->Parameters.MountVolume.DeviceObject;
-
     auto RealDevice = Vpb->RealDevice;
     
     SetDoVerifyOnFail = UDFRealDevNeedsVerify(RealDevice);
 
-    if (FlagOn(TargetDeviceObject->Characteristics, FILE_FLOPPY_DISKETTE)) {
+    if (FlagOn(DeviceObjectWeTalkTo->Characteristics, FILE_FLOPPY_DISKETTE)) {
 
         UDFCompleteRequest(IrpContext, Irp, STATUS_UNRECOGNIZED_VOLUME);
         return STATUS_UNRECOGNIZED_VOLUME;
@@ -333,9 +326,9 @@ UDFMountVolume(
         return STATUS_SYSTEM_SHUTDOWN;
     }
 
-    RemovableMedia = FlagOn(TargetDeviceObject->Characteristics, FILE_REMOVABLE_MEDIA);
+    RemovableMedia = FlagOn(DeviceObjectWeTalkTo->Characteristics, FILE_REMOVABLE_MEDIA);
 
-    if (TargetDeviceObject->DeviceType == FILE_DEVICE_CD_ROM) {
+    if (DeviceObjectWeTalkTo->DeviceType == FILE_DEVICE_CD_ROM) {
         FsDeviceType = FILE_DEVICE_CD_ROM_FILE_SYSTEM;
     } else {
         FsDeviceType = FILE_DEVICE_DISK_FILE_SYSTEM;
@@ -345,7 +338,7 @@ UDFMountVolume(
     RC = UDFPhSendIOCTL((RealDevice->DeviceType == FILE_DEVICE_CD_ROM ?
         IOCTL_CDROM_CHECK_VERIFY :
         IOCTL_DISK_CHECK_VERIFY),
-        TargetDeviceObject,
+        DeviceObjectWeTalkTo,
         NULL, 0,
         &MediaChangeCount, sizeof(ULONG),
         TRUE,
@@ -360,7 +353,7 @@ UDFMountVolume(
     RC = UDFPhSendIOCTL((RealDevice->DeviceType == FILE_DEVICE_CD_ROM ?
             IOCTL_CDROM_GET_DRIVE_GEOMETRY :
             IOCTL_DISK_GET_DRIVE_GEOMETRY),
-            TargetDeviceObject,
+            DeviceObjectWeTalkTo,
             NULL, 0,
             &DiskGeometry, sizeof(DISK_GEOMETRY),
             TRUE,
@@ -372,8 +365,9 @@ UDFMountVolume(
         return RC;
     }
 
-    // Acquire GlobalDataResource
-    UDFAcquireResourceExclusive(&UdfData.GlobalDataResource, TRUE);
+    // Acquire the global resource to do mount operations.
+
+    UDFAcquireUdfData(IrpContext);
 
     _SEH2_TRY {
 
@@ -405,25 +399,26 @@ UDFMountVolume(
 
         // Our alignment requirement is the larger of the processor alignment requirement
         // already in the volume device object and that in the DeviceObjectWeTalkTo
-        if (TargetDeviceObject->AlignmentRequirement > VolDo->AlignmentRequirement) {
-            VolDo->AlignmentRequirement = TargetDeviceObject->AlignmentRequirement;
+        if (DeviceObjectWeTalkTo->AlignmentRequirement > VolDo->AlignmentRequirement) {
+            VolDo->AlignmentRequirement = DeviceObjectWeTalkTo->AlignmentRequirement;
         }
 
-        VolDo->Flags &= ~DO_DEVICE_INITIALIZING;
+        // We must initialize the stack size in our device object before
+        // the following reads, because the I/O system has not done it yet.
+
+        VolDo->StackSize = (CCHAR) (DeviceObjectWeTalkTo->StackSize + 1);
+
+        ClearFlag(VolDo->Flags, DO_DEVICE_INITIALIZING);
 
         // device object field in the VPB to point to our new volume device
         // object.
         Vpb->DeviceObject = (PDEVICE_OBJECT) VolDo;
 
-        // We must initialize the stack size in our device object before
-        // the following reads, because the I/O system has not done it yet.
-        ((PDEVICE_OBJECT)VolDo)->StackSize = (CCHAR) (TargetDeviceObject->StackSize + 1);
-
         Vcb = (PVCB)VolDo->DeviceExtension;
 
         // Initialize the Vcb.  This routine will raise on an allocation
         // failure.
-        RC = UDFInitializeVCB(IrpContext, VolDo, TargetDeviceObject, Vpb);
+        RC = UDFInitializeVCB(IrpContext, VolDo, DeviceObjectWeTalkTo, Vpb);
         if (!NT_SUCCESS(RC)) {
             Vcb = NULL;
             try_return(RC);
@@ -450,7 +445,7 @@ UDFMountVolume(
         UDFMarkRealDevVerifyOk(Vcb->Vpb->RealDevice);
 
         DeviceNotTouched = FALSE;
-        RC = UDFGetDiskInfo(IrpContext, TargetDeviceObject, Vcb);
+        RC = UDFGetDiskInfo(IrpContext, DeviceObjectWeTalkTo, Vcb);
         if (!NT_SUCCESS(RC)) try_return(RC);
 
         //     ****  Read registry settings  ****
@@ -490,7 +485,7 @@ UDFMountVolume(
         if (!NT_SUCCESS(RC)) try_return(RC);
 
         UDFAcquireResourceExclusive(&(Vcb->BitMapResource1),TRUE);
-        RC = UDFGetDiskInfoAndVerify(IrpContext, TargetDeviceObject,Vcb);
+        RC = UDFGetDiskInfoAndVerify(IrpContext, DeviceObjectWeTalkTo,Vcb);
         UDFReleaseResource(&(Vcb->BitMapResource1));
 
         ASSERT(!Vcb->Modified);
@@ -565,9 +560,14 @@ UDFMountVolume(
                        Vcb->VolIdent.Buffer,
                        Vcb->VolIdent.Length );
 
+        // The new mount is complete.  Remove the additional references on this
+        // Vcb and the device we are mounted on top of.
+
+        Vcb->VcbReference -= Vcb->VcbResidualReference;
+        NT_ASSERT(Vcb->VcbReference == Vcb->VcbResidualReference);
+
         Vcb->VcbCondition = VcbMounted;
 
-        UDFInterlockedDecrement((PLONG)&(Vcb->VcbReference));
         Vcb->TotalAllocUnits = UDFGetTotalSpace(Vcb);
         Vcb->FreeAllocUnits = UDFGetFreeSpace(Vcb);
 
@@ -603,7 +603,7 @@ try_exit: NOTHING;
                 if (Vcb->VcbReference)
                     UDFInterlockedDecrement((PLONG)&(Vcb->VcbReference));
                 // This procedure will also delete the volume device object
-                if (UDFDismountVcb(IrpContext, Vcb, VcbAcquired )) {
+                if (UDFDismountVcb(IrpContext, Vcb, FALSE)) {
                     UDFReleaseResource( &(Vcb->VcbResource) );
                 }
             } else if (VolDo) {
@@ -620,7 +620,8 @@ try_exit: NOTHING;
         }
 
         // Release the global resource.
-        UDFReleaseResource(&UdfData.GlobalDataResource);
+
+        UDFReleaseUdfData(IrpContext);
 
     } _SEH2_END;
 
@@ -816,7 +817,7 @@ UDFScanForDismountedVcb(
         // go away.
         if ((Vcb->VcbCondition == VcbDismountInProgress) ||
             (Vcb->VcbCondition == VcbInvalid) ||
-            ((Vcb->VcbCondition == VcbNotMounted) && (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE))) {
+            ((Vcb->VcbCondition == VcbNotMounted) && (Vcb->VcbReference <= Vcb->VcbResidualReference))) {
 
             UDFCheckForDismount(IrpContext, Vcb, FALSE);
         }
@@ -954,15 +955,12 @@ UDFLockVolume(
     IN PIRP             Irp
     )
 {
-    NTSTATUS RC;
+    NTSTATUS Status;
     PVCB Vcb;
     PFCB Fcb;
     PCCB Ccb;
 
-    KIRQL SavedIrql;
-    PIO_STACK_LOCATION IrpSp = IoGetCurrentIrpStackLocation( Irp );
-
-    BOOLEAN VcbAcquired = FALSE;
+    PIO_STACK_LOCATION IrpSp = IoGetCurrentIrpStackLocation(Irp);
 
     // Decode the file object, the only type of opens we accept are
     // user volume opens.
@@ -992,87 +990,34 @@ UDFLockVolume(
 
     FsRtlNotifyVolumeEvent(IrpSp->FileObject, FSRTL_VOLUME_LOCK);
 
+    SetFlag(IrpContext->Flags, IRP_CONTEXT_FLAG_WAIT);
+
+    UDFAcquireVcbExclusive(IrpContext, Vcb, FALSE);
+
     _SEH2_TRY {
 
-        UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
+        // Verify the Vcb.
 
-#ifdef UDF_DELAYED_CLOSE
-        UDFFspClose(Vcb);
-#endif //UDF_DELAYED_CLOSE
+        UDFVerifyVcb(IrpContext, Vcb);
 
-        //  Acquire exclusive access to the Vcb.
-        UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE );
-        VcbAcquired = TRUE;
-
-        //  Verify the Vcb.
-        UDFVerifyVcb( IrpContext, Vcb );
-
-        //  If the volume is already locked then complete with success if this file
-        //  object has the volume locked, fail otherwise.
-/*        if (Vcb->VcbState & UDF_VCB_FLAGS_VOLUME_LOCKED) {
-
-            if (Vcb->VolumeLockFileObject == IrpSp->FileObject) {
-                RC = STATUS_SUCCESS;
-            } else {
-                RC = STATUS_ACCESS_DENIED;
-            }
-        //  If the open count for the volume is greater than 1 then this request
-        //  will fail.
-        } else if (Vcb->VcbReference > UDF_RESIDUAL_REFERENCE+1) {
-            RC = STATUS_ACCESS_DENIED;
-        //  We will try to get rid of all of the user references.  If there is only one
-        //  remaining after the purge then we can allow the volume to be locked.
-        } else {
-            // flush system cache
-            UDFReleaseResource( &(Vcb->VcbResource) );
-            VcbAcquired = FALSE;
-        }*/
+        Status = UDFLockVolumeInternal(IrpContext, Vcb, IrpSp->FileObject);
 
     } _SEH2_FINALLY {
 
-        //  Release the Vcb.
-        if (VcbAcquired) {
-            UDFReleaseResource( &(Vcb->VcbResource) );
-            VcbAcquired = FALSE;
+        // Release the Vcb.
+
+        UDFReleaseVcb(IrpContext, Vcb);
+        
+        if (AbnormalTermination() || !NT_SUCCESS(Status)) {
+
+            FsRtlNotifyVolumeEvent(IrpSp->FileObject, FSRTL_VOLUME_LOCK_FAILED);
         }
     } _SEH2_END;
 
-    UDFAcquireResourceExclusive(&(Vcb->VcbResource), TRUE );
-    VcbAcquired = TRUE;
-    UDFFlushVolume(IrpContext, Vcb);
-    UDFReleaseResource( &(Vcb->VcbResource) );
-    VcbAcquired = FALSE;
-    //  Check if the Vcb is already locked, or if the open file count
-    //  is greater than 1 (which implies that someone else also is
-    //  currently using the volume, or a file on the volume).
-    IoAcquireVpbSpinLock( &SavedIrql );
+    // Complete the request if there haven't been any exceptions.
 
-    if (!(Vcb->Vpb->Flags & VPB_LOCKED) &&
-        (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE+1) &&
-        (Vcb->Vpb->ReferenceCount == 2)) {
-
-        // Mark volume as locked
-        Vcb->Vpb->Flags |= VPB_LOCKED;
-        Vcb->VcbState |= VCB_STATE_LOCKED;
-        Vcb->VolumeLockFileObject = IrpSp->FileObject;
-
-        RC = STATUS_SUCCESS;
-
-    } else {
-
-        RC = STATUS_ACCESS_DENIED;
-    }
-
-    IoReleaseVpbSpinLock( SavedIrql );
-
-    if (!NT_SUCCESS(RC)) {
-        FsRtlNotifyVolumeEvent(IrpSp->FileObject, FSRTL_VOLUME_LOCK_FAILED);
-    }
-
-    //  Complete the request if there haven't been any exceptions.
-
-    UDFCompleteRequest(IrpContext, Irp, RC);
-    return RC;
+    UDFCompleteRequest(IrpContext, Irp, Status);
+    return Status;
 } // end UDFLockVolume()
 
 _Requires_lock_held_(_Global_critical_region_)
@@ -1111,7 +1056,7 @@ Return Value:
     NTSTATUS Status;
     KIRQL SavedIrql;
     NTSTATUS FinalStatus = (FileObject? STATUS_ACCESS_DENIED: STATUS_DEVICE_BUSY);
-    //ULONG RemainingUserReferences = (FileObject? 1: 0);
+    ULONG RemainingUserReferences = (FileObject? 1: 0);
 
     ASSERT_EXCLUSIVE_VCB(Vcb);
 
@@ -1160,13 +1105,9 @@ Return Value:
         return Status;
     }
 
-    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
         UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
-    //FspClose( Vcb );
-
     //
     //  If the volume is already explicitly locked then fail.  We use the
     //  Vpb locked flag as an 'explicit lock' flag in the same way as Fat.
@@ -1174,14 +1115,9 @@ Return Value:
 
     IoAcquireVpbSpinLock( &SavedIrql ); 
 
-    // TODO: use VcbCleanup
-    //if (!FlagOn( Vcb->Vpb->Flags, VPB_LOCKED ) && 
-    //    (Vcb->VcbCleanup == RemainingUserReferences) &&
-    //   (Vcb->VcbUserReference == CDFS_RESIDUAL_USER_REFERENCE + RemainingUserReferences))  {
-
-    if (!(Vcb->Vpb->Flags & VPB_LOCKED) &&
-        (Vcb->VcbReference <= UDF_RESIDUAL_REFERENCE+1) &&
-        (Vcb->Vpb->ReferenceCount == 2)) {
+    if (!FlagOn(Vcb->Vpb->Flags, VPB_LOCKED) && 
+        (Vcb->VcbCleanup == RemainingUserReferences) &&
+        (Vcb->VcbUserReference == Vcb->VcbResidualUserReference + RemainingUserReferences)) {
 
         SetFlag(Vcb->VcbState, VCB_STATE_LOCKED);
         SetFlag(Vcb->Vpb->Flags, VPB_LOCKED);
@@ -1321,8 +1257,6 @@ UDFDismountVolume(
 
     FsRtlNotifyVolumeEvent(IrpSp->FileObject, FSRTL_VOLUME_DISMOUNT);
 
-    UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-
 #ifdef UDF_DELAYED_CLOSE
     UDFFspClose(Vcb);
 #endif //UDF_DELAYED_CLOSE
@@ -1342,14 +1276,8 @@ UDFDismountVolume(
             VcbAcquired = FALSE;
 
             Status = STATUS_VOLUME_DISMOUNTED;
-        } else
-        if (/*!(Vcb->VcbState & UDF_VCB_FLAGS_VOLUME_MOUNTED) ||*/
-           !(Vcb->VcbState & VCB_STATE_LOCKED) ||
-            (Vcb->VcbReference > (UDF_RESIDUAL_REFERENCE+1))) {
 
-            Status = STATUS_NOT_LOCKED;
-        } else
-        if ((Vcb->VolumeLockFileObject != IrpSp->FileObject)) {
+        } else if ((Vcb->VolumeLockFileObject != IrpSp->FileObject)) {
 
             Status = STATUS_INVALID_PARAMETER;
 
@@ -1891,8 +1819,9 @@ UDFInvalidateVolumes(
     //  Grab the DeviceObject from the FileObject.
     DeviceToMarkBad = FileToMarkBad->DeviceObject;
 
-    // Acquire GlobalDataResource
-    UDFAcquireResourceExclusive(&(UdfData.GlobalDataResource), TRUE);
+    // Synchronise with pnp/mount/verify paths.
+
+    UDFAcquireUdfData(IrpContext);
 
     // Walk through all of the Vcb's attached to the global data.
     Link = UdfData.VcbQueue.Flink;
@@ -1946,8 +1875,7 @@ UDFInvalidateVolumes(
 
             if (Vcb->RootIndexFcb && Vcb->RootIndexFcb->FileInfo) {
                 UDFPrint(("    UDFInvalidateVolumes:     UDFCloseAllSystemDelayedInDir\n"));
-                RC = UDFCloseAllSystemDelayedInDir(Vcb, Vcb->RootIndexFcb->FileInfo);
-                ASSERT(NT_SUCCESS(RC));
+                UDFFspClose(Vcb);
             }
 #ifdef UDF_DELAYED_CLOSE
             UDFPrint(("    UDFInvalidateVolumes:     UDFCloseAllDelayed\n"));
@@ -1968,19 +1896,12 @@ UDFInvalidateVolumes(
         }
 
     }
-    // Once we have processed all the mounted logical volumes, we can release
-    // all acquired global resources and leave (in peace :-)
-    UDFReleaseResource( &(UdfData.GlobalDataResource) );
 
-    // drop volume completly
-    UDFPrint(("UDFInvalidateVolumes: drop volume completly\n"));
-    UDFAcquireResourceExclusive(&UdfData.GlobalDataResource, TRUE);
     UDFScanForDismountedVcb(IrpContext);
-    UDFReleaseResource(&UdfData.GlobalDataResource);
+
+    UDFReleaseUdfData(IrpContext);
 
     UDFCompleteRequest(IrpContext, Irp, STATUS_SUCCESS);
-
-    UDFPrint(("UDFInvalidateVolumes: done\n"));
     return STATUS_SUCCESS;
 
 } // end UDFInvalidateVolumes()
