@@ -67,6 +67,10 @@ UDFRead(
 
     TmPrint(("UDFRead: \n"));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(Read);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -107,6 +111,10 @@ UDFRead(
     }
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(Read);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 } // end UDFRead()

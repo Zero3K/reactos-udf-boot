@@ -24,6 +24,11 @@ UDFDriverUnload(
 
     UDFPrint( ("UDF: Unloading!!\n") );
 
+#ifdef MEASURE_IO_PERFORMANCE
+    // Write final performance statistics to log
+    UDFWritePerformanceLog();
+#endif //MEASURE_IO_PERFORMANCE
+
     // prevent mount oparations
     UdfData.Flags |= UDF_DATA_FLAGS_SHUTDOWN;
 

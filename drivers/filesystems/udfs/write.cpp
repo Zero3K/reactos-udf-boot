@@ -48,6 +48,10 @@ UDFWrite(
 
     TmPrint(("UDFWrite: , thrd:%8.8x\n",PsGetCurrentThread()));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(Write);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -88,6 +92,10 @@ UDFWrite(
     }
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(Write);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 } // end UDFWrite()

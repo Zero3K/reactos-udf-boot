@@ -65,6 +65,10 @@ UDFDirControl(
 
     TmPrint(("UDFDirControl: \n"));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(DirControl);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -96,6 +100,10 @@ UDFDirControl(
     }
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(DirControl);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 } // end UDFDirControl()

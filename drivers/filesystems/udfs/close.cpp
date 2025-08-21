@@ -79,6 +79,10 @@ UDFClose(
 
     AdPrint(("UDFClose: \n"));
 
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_START(Close);
+#endif //MEASURE_IO_PERFORMANCE
+
     FsRtlEnterFileSystem();
     ASSERT(DeviceObject);
     ASSERT(Irp);
@@ -106,6 +110,10 @@ UDFClose(
     }
 
     FsRtlExitFileSystem();
+
+#ifdef MEASURE_IO_PERFORMANCE
+    UDF_PERF_END(Close);
+#endif //MEASURE_IO_PERFORMANCE
 
     return(RC);
 }
