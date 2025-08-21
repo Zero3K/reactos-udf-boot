@@ -129,6 +129,10 @@ Return Value:
 
     FcbNonpaged = UDFAllocateFcbNonpaged();
 
+    // Add assertions to help catch allocation failures early
+    NT_ASSERT(FcbNonpaged != NULL);
+    NT_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+
     RtlZeroMemory(FcbNonpaged, sizeof(FCB_NONPAGED));
 
     FcbNonpaged->NodeTypeCode = UDF_NODE_TYPE_FCB_NONPAGED;
@@ -138,6 +142,10 @@ Return Value:
     ExInitializeResourceLite(&FcbNonpaged->FcbResource);
     ExInitializeFastMutex(&FcbNonpaged->FcbMutex);
     ExInitializeFastMutex(&FcbNonpaged->AdvancedFcbHeaderMutex);
+    
+    // Verify resources were properly initialized
+    NT_ASSERT((*((PULONG)&FcbNonpaged->FcbResource)) != 0);
+    NT_ASSERT((*((PULONG)&FcbNonpaged->FcbPagingIoResource)) != 0);
 
     return FcbNonpaged;
 }
@@ -169,7 +177,25 @@ Return Value:
     
     UNREFERENCED_PARAMETER(IrpContext);
     
+    // Add assertions to help diagnose BSOD during resource cleanup
+    NT_ASSERT(FcbNonpaged != NULL);
+    NT_ASSERT(FcbNonpaged->NodeTypeCode == UDF_NODE_TYPE_FCB_NONPAGED);
+    NT_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+    
+    // Verify resource is not currently acquired before deleting
+    NT_ASSERT(!ExIsResourceAcquiredExclusiveLite(&FcbNonpaged->FcbResource));
+    NT_ASSERT(!ExIsResourceAcquiredSharedLite(&FcbNonpaged->FcbResource));
+    NT_ASSERT(!ExIsResourceAcquiredExclusiveLite(&FcbNonpaged->FcbPagingIoResource));
+    NT_ASSERT(!ExIsResourceAcquiredSharedLite(&FcbNonpaged->FcbPagingIoResource));
+    
+    // Verify resource structure is not corrupted (first ULONG should be non-zero if initialized)
+    NT_ASSERT((*((PULONG)&FcbNonpaged->FcbResource)) != 0);
+    NT_ASSERT((*(((PULONG)&FcbNonpaged->FcbResource) + 1)) != 0);
+    NT_ASSERT((*((PULONG)&FcbNonpaged->FcbPagingIoResource)) != 0);
+    NT_ASSERT((*(((PULONG)&FcbNonpaged->FcbPagingIoResource) + 1)) != 0);
+    
     ExDeleteResourceLite(&FcbNonpaged->FcbResource);
+    ExDeleteResourceLite(&FcbNonpaged->FcbPagingIoResource);
 
     UDFDeallocateFcbNonpaged(FcbNonpaged);
 
@@ -204,6 +230,15 @@ Return Value:
     PVCB Vcb = NULL;
     PAGED_CODE();
 
+    // Add comprehensive assertions to help diagnose BSOD
+    NT_ASSERT(Fcb != NULL);
+    NT_ASSERT(KeGetCurrentIrql() < DISPATCH_LEVEL);
+    
+    // Verify FCB structure integrity
+    NT_ASSERT(SafeNodeType(Fcb) == UDF_NODE_TYPE_FCB || 
+              SafeNodeType(Fcb) == UDF_NODE_TYPE_INDEX || 
+              SafeNodeType(Fcb) == UDF_NODE_TYPE_DATA);
+
     //  Sanity check the counts.
 
     NT_ASSERT( Fcb->FcbCleanup == 0 );
@@ -217,7 +252,13 @@ Return Value:
 
    // CdUninitializeMcb( IrpContext, Fcb );
 
-  //  CdDeleteFcbNonpaged( IrpContext, Fcb->FcbNonpaged );
+    // Clean up the non-paged portion of the FCB - this was commented out but is needed
+    if (Fcb->FcbNonpaged != NULL) {
+        UDFDeleteFcbNonpaged( IrpContext, Fcb->FcbNonpaged );
+        Fcb->FcbNonpaged = NULL;
+        Fcb->Header.Resource = NULL;
+        Fcb->Header.PagingIoResource = NULL;
+    }
 
     //
     //  Check if we need to deallocate the prefix name buffer.
