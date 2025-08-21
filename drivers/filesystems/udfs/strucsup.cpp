@@ -252,13 +252,14 @@ Return Value:
 
    // CdUninitializeMcb( IrpContext, Fcb );
 
-    // Clean up the non-paged portion of the FCB - commented out as it causes UDF detection issues
-    // if (Fcb->FcbNonpaged != NULL) {
-    //     UDFDeleteFcbNonpaged( IrpContext, Fcb->FcbNonpaged );
-    //     Fcb->FcbNonpaged = NULL;
-    //     Fcb->Header.Resource = NULL;
-    //     Fcb->Header.PagingIoResource = NULL;
-    // }
+    // Clean up the non-paged portion of the FCB only if no references remain
+    // This prevents premature cleanup during UDF detection
+    if (Fcb->FcbNonpaged != NULL && Fcb->FcbCleanup == 0 && Fcb->FcbReference == 0) {
+        UDFDeleteFcbNonpaged( IrpContext, Fcb->FcbNonpaged );
+        Fcb->FcbNonpaged = NULL;
+        Fcb->Header.Resource = NULL;
+        Fcb->Header.PagingIoResource = NULL;
+    }
 
     //
     //  Check if we need to deallocate the prefix name buffer.
