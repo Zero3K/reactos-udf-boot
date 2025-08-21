@@ -263,6 +263,11 @@ UDFCommonCleanup(
         AcquiredParentFCB = TRUE;
         // Acquire current object
         UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+        // Add critical assertions to diagnose resource corruption in cleanup path
+        NT_ASSERT(Fcb->FcbNonpaged != NULL);
+        NT_ASSERT(Fcb->FcbNonpaged->NodeTypeCode == UDF_NODE_TYPE_FCB_NONPAGED);
+        NT_ASSERT((*((PULONG)&Fcb->FcbNonpaged->FcbResource)) != 0);
+        NT_ASSERT(KeGetCurrentIrql() <= APC_LEVEL);
         UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, TRUE);
         AcquiredFCB = TRUE;
 

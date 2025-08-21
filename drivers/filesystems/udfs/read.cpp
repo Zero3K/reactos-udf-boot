@@ -497,6 +497,11 @@ UDFCommonRead(
                 // We hold the main resource exclusive here because the flush
                 // may generate a recursive write in this thread.
                 UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                // Add assertions to help diagnose resource corruption before acquisition
+                NT_ASSERT(Fcb->FcbNonpaged != NULL);
+                NT_ASSERT(Fcb->FcbNonpaged->NodeTypeCode == UDF_NODE_TYPE_FCB_NONPAGED);
+                NT_ASSERT((*((PULONG)&Fcb->FcbNonpaged->FcbResource)) != 0);
+                NT_ASSERT(KeGetCurrentIrql() <= APC_LEVEL);
                 if (!UDFAcquireResourceExclusive(&Fcb->FcbNonpaged->FcbResource, CanWait)) {
                     try_return(RC = STATUS_PENDING);
                 }
@@ -520,6 +525,11 @@ UDFCommonRead(
 
             } else {
                 UDF_CHECK_PAGING_IO_RESOURCE(Fcb);
+                // Add assertions to help diagnose resource corruption before acquisition
+                NT_ASSERT(Fcb->FcbNonpaged != NULL);
+                NT_ASSERT(Fcb->FcbNonpaged->NodeTypeCode == UDF_NODE_TYPE_FCB_NONPAGED);
+                NT_ASSERT((*((PULONG)&Fcb->FcbNonpaged->FcbResource)) != 0);
+                NT_ASSERT(KeGetCurrentIrql() <= APC_LEVEL);
                 if (!UDFAcquireResourceShared(&Fcb->FcbNonpaged->FcbResource, CanWait)) {
                     try_return(RC = STATUS_PENDING);
                 }
