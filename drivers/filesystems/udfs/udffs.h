@@ -34,6 +34,7 @@
 #endif //UDF_LIMIT_NAME_LEN
 
 #define IFS_40
+// When enabled, makes UDF filesystem appear as NTFS to the system
 //#define PRETEND_NTFS
 
 //#define UDF_ASYNC_IO
@@ -359,6 +360,8 @@ UDFFreePool(
 #define         UDF_PART_DAMAGED_RO                 (0x01)
 #define         UDF_PART_DAMAGED_NO                 (0x02)
 
+// Device names always remain UDF to avoid conflicts with real NTFS driver
+// PRETEND_NTFS only affects filesystem titles, not device names
 #define         UDF_FS_NAME_CD              L"\\UdfCd"
 #define         UDF_FS_NAME_HDD             L"\\UdfHdd"
 

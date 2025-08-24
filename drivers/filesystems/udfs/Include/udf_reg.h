@@ -10,8 +10,39 @@
 #define         REG_DEFAULT_UNKNOWN         L"_Default\\Unknown"
 #define         REG_NAMELESS_DEV            L"\\_Nameless_"
 
+#ifndef PRETEND_NTFS
+#define         UDF_FS_TITLE_DVDRAM         L"UDF-DVDRAM"
+#define         UDF_FS_TITLE_DVDpRW         L"UDF-DVD+RW"
+#define         UDF_FS_TITLE_DVDpR          L"UDF-DVD+R"
+#define         UDF_FS_TITLE_DVDRW          L"UDF-DVDRW"
+#define         UDF_FS_TITLE_DVDR           L"UDF-DVDR"
+#define         UDF_FS_TITLE_DVDROM         L"UDF-DVDROM"
+#define         UDF_FS_TITLE_CDRW           L"UDF-CDRW"
+#define         UDF_FS_TITLE_CDR            L"UDF-CDR"
+#define         UDF_FS_TITLE_CDROM          L"UDF-CDROM"
+#define         UDF_FS_TITLE_HDD            L"UDF"
+#else  //PRETEND_NTFS
+#define         UDF_FS_TITLE_DVDRAM         L"NTFS"
+#define         UDF_FS_TITLE_DVDpRW         L"NTFS"
+#define         UDF_FS_TITLE_DVDpR          L"NTFS"
+#define         UDF_FS_TITLE_DVDRW          L"NTFS"
+#define         UDF_FS_TITLE_DVDR           L"NTFS"
+#define         UDF_FS_TITLE_DVDROM         L"NTFS"
+#define         UDF_FS_TITLE_CDRW           L"NTFS"
+#define         UDF_FS_TITLE_CDR            L"NTFS"
+#define         UDF_FS_TITLE_CDROM          L"NTFS"
+#define         UDF_FS_TITLE_HDD            L"NTFS"
+#endif //PRETEND_NTFS
+
 #define         UDF_FS_TITLE_BLANK          L"Blank media"
+#define         UDF_FS_TITLE_UNKNOWN        L"Unknown"
 #define         UDF_BLANK_VOLUME_LABEL      L"Blank CD"
+
+// UDF_CHECK_FS_NAME macro for filesystem identification (from original ReactOS)
+// Used to check if a filesystem name matches a UDF_FS_TITLE pattern
+#define UDF_CHECK_FS_NAME(Buffer, name) \
+    ((Buffer)->FileSystemNameLength + sizeof(WCHAR) == sizeof(name) && \
+     DbgCompareMemory(&(Buffer)->FileSystemName[0], (name), sizeof(name)) == sizeof(name))
 #define         REG_USEEXTENDEDFE_NAME      L"UseExtendedFE"
 #define         REG_DEFALLOCMODE_NAME       L"DefaultAllocMode"
 #define         UDF_DIR_PACK_THRESHOLD_NAME L"PackDirThreshold"

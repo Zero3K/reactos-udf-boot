@@ -214,6 +214,12 @@ DriverEntry(
                 UDFDestroyZones();
             }
 
+            // free the saved registry path buffer if allocated
+            if (UdfData.SavedRegPath.Buffer) {
+                MyFreePool__(UdfData.SavedRegPath.Buffer);
+                UdfData.SavedRegPath.Buffer = NULL;
+            }
+
             // delete the resource we may have initialized
             if (UdfData.Flags & UDF_DATA_FLAGS_RESOURCE_INITIALIZED) {
                 // un-initialize this resource

@@ -514,16 +514,48 @@ UDFQueryFsAttributeInfo(
     *Length &= ~1;
     //  Determine how much of the file system name will fit.
 
-#define UDF_FS_TITLE_UDF L"UDF"
-
 #define UDFSetFsTitle(tit) \
                 FsTypeTitle = UDF_FS_TITLE_##tit; \
                 FsTypeTitleLen = sizeof(UDF_FS_TITLE_##tit) - sizeof(WCHAR);
 
-    UDFSetFsTitle(UDF);
+    switch(Vcb->TargetDeviceObject->DeviceType) {
+    case FILE_DEVICE_CD_ROM: {
+        // Implement filesystem title selection based on original ReactOS patterns
+        // Adapted for the refactored codebase with simplified media type detection
+        if(Vcb->VcbState & UDF_VCB_FLAGS_RAW_DISK) {
+            if(!Vcb->LastLBA) {
+                UDFSetFsTitle(BLANK);
+            } else {
+                UDFSetFsTitle(UNKNOWN);
+            }
+        } else if(Vcb->VcbState & VCB_STATE_VOLUME_READ_ONLY) {
+            // For read-only media, assume CD-ROM/DVD-ROM
+            UDFSetFsTitle(CDROM);
+        } else {
+            // For writable media, use CDRW as default
+            // In the original ReactOS code, this would check specific media classes
+            // but in this refactored version we use a reasonable default
+            UDFSetFsTitle(CDRW);
+        }
+        break;
+    }
+    case FILE_DEVICE_DVD: {
+        // Handle DVD devices - in original ReactOS this was part of CD_ROM case
+        if(Vcb->VcbState & VCB_STATE_VOLUME_READ_ONLY) {
+            UDFSetFsTitle(DVDROM);
+        } else {
+            UDFSetFsTitle(DVDRW);
+        }
+        break;
+    }
+    default: {
+        // For hard disk and other devices
+        UDFSetFsTitle(HDD);
+        break;
+    }
+    }
 
 #undef UDFSetFsTitle
-#undef UDF_FS_TITLE_UDF
 
     if (*Length >= FsTypeTitleLen) {
         BytesToCopy = FsTypeTitleLen;
